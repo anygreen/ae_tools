@@ -80,7 +80,7 @@ try{
     var groupTwo = myWin.add("group", undefined, "GroupTwo");
         groupTwo.orientation = "row";
         groupTwo.add("statictext", undefined, "Mode:");
-        var mode = groupTwo.add("dropdownlist", undefined, ["make channels white","set channels to alpha","full RGB color"]);
+        var mode = groupTwo.add("dropdownlist", undefined, ["luma mattes","alpha mattes","RGB mattes"]);
         mode.selection = 0;
 
     var groupThree = myWin.add("group", undefined, "GroupThree");
