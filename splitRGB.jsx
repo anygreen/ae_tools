@@ -52,15 +52,15 @@ try{
 
   function setChannels(mode,newRC,newGC,newBC){
 
-    if (mode == "make channels white") {
+    if (mode == "luma mattes") {
       setMode0(newRC,newGC,newBC);
     }
 
-    if (mode == "set channels to alpha") {
+    if (mode == "alpha mattes") {
       setMode1(newRC,newGC,newBC);
     }
 
-    if (mode == "full RGB color") {
+    if (mode == "RGB mattes") {
       setMode2(newRC,newGC,newBC);
     }
 
