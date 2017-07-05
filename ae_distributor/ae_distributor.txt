@@ -1,0 +1,6 @@
+https://github.com/anygreen/nhb_ae_tools/archive/master.zip
+http://github.com/anygreen/nhb_ae_tools/archive/master.zip
+
+curl -sL https://github.com/hasusuf/aes_releases/archive/latest.tar.gz | tar xz --strip 1  -C ./Scripts
+
+cd ~/downloads;curl -L -o ./master.zip -k https://github.com/anygreen/nhb_ae_tools/archive/master.zip;unzip master.zip;cd nhb_ae_tools-master;rm -rf __MACOSX;cd ~/downloads;mkdir nhb_ae_tools-master_tmp;cd nhb_ae_tools-master_tmp;mkdir Scripts;mv -v ~/downloads/nhb_ae_tools-master/* ~/downloads/nhb_ae_tools-master_tmp/Scripts/;rsync -r ~/downloads/nhb_ae_tools-master_tmp/Scripts/ ~/Library/Preferences/Adobe/After\ Effects/14.2/Scripts/;rm ~/downloads/master.zip;rm -r ~/downloads/nhb_ae_tools-master;rm -r ~/downloads/nhb_ae_tools-master_tmp
