@@ -6,6 +6,7 @@ function myScript(thisObj){
     res = "group{orientation:'column', alignment:['fill','top'], alignChildren:['fill','fill'],\
             groupOne: Group{orientation:'column',\
               myStaticText: StaticText{text:''},\
+              myInput: EditText{text:'/Users/nhb/github/ae_tools/', preferredSize:[400,-1]},\
               myButton: Button{text:'Run'},\
             },\
           }";
@@ -27,7 +28,7 @@ function myScript(thisObj){
 
     myPanel.grp.groupOne.myButton.onClick = function () {
       try {
-        var scriptFile = File('/Users/nhb/Desktop/splitRGB.jsx');
+        var scriptFile = File(myPanel.grp.groupOne.myInput.text.toString());
         var script = '#include' + scriptFile.fullName;
 
         eval(script);
