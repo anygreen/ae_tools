@@ -10,7 +10,7 @@ try{
     }
   };
 
-  app.scheduleTask("doSave()", 240000, true);
+  app.scheduleTask("doSave()", 600000, true);
 
 }catch(err){
   alert("Error in line: " + err.line + "\n" + err.toString());
