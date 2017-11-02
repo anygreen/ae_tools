@@ -1,4 +1,4 @@
-// Version 0.1
+// Version 0.2
 
 
 //<editor-fold> startup variables
@@ -22,7 +22,7 @@ function setVariables(){
 
 //</editor-fold>
 
-//<editor-fold> functions - creating solids
+//<editor-fold> functions
 
 //Creates a solid with a random green color and different options
 function createSolid(options){
@@ -86,12 +86,6 @@ function findDivide(number){
   alert(dividers);
 }
 
-
-// function reduceContrast(value,amount){
-//     var result = (value*amount)+0.5;
-//     return result;
-// }
-
 //creates a random (green) color
 function randomColor(){
   var colorR = generateRandomNumber()*0.1;
@@ -100,6 +94,7 @@ function randomColor(){
 
   return [colorR,colorG,colorB]
 };
+
 //this function creates an array filled with the names of the layers that were selected
 function selectionToNameArray(array){
   var newArray = [];
@@ -173,6 +168,7 @@ function removeSelected(selectedLayers){
   }
 }
 
+//detects if layer toches the edges of the comp
 function edgeDetection(element){
 
   var addDistance = 2;
@@ -203,6 +199,7 @@ function edgeDetection(element){
   return detection
 }
 
+//checks if b is part of a (a needs to be an array)
 function checkContent(a,b){
   var contains = false;
   for (var i = 0; i < a.length; i++) {
@@ -213,7 +210,7 @@ function checkContent(a,b){
   return contains
 };
 
-
+//creates the shape layer for the border
 function createBorder(element){
   // alert(element.source);
   var source = element.source;
@@ -280,13 +277,30 @@ function createBorder(element){
   }
 }
 
+//creating a random tile name
+function randomTileName(){
+  // var possibleLetters = "abcdefghijklmnopqrstuvwxyz";
+  var possibleLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  var possibleNumbers = "0123456789";
+  var tileName = "Tile_";
+  tileName = tileName+possibleLetters.charAt(Math.floor(generateRandomNumber() * possibleLetters.length));
+  tileName = tileName+possibleNumbers.charAt(Math.floor(generateRandomNumber() * possibleNumbers.length));
+  tileName = tileName.toString()+possibleNumbers.charAt(Math.floor(generateRandomNumber() * possibleNumbers.length));
+
+  return tileName
+}
+
+//converts selected solids to a comp
 function selectionToComp(){
   var selectedLayers = activeItem.selectedLayers;
   var names = selectionToNameArray(selectedLayers);
   var firstAndLast = getFirstAndLast(names);
   var newSolid = calculategroupedSolid(firstAndLast,selectedLayers);
 
-  var newTileName = prompt("Enter the name of the new Comp","Tile_0");
+  var newTileName = prompt("Enter the name of the new Comp\nIf you keep the name \"Tile_0\" a random name will be generated","Tile_0");
+  if (newTileName == "Tile_0") {
+    newTileName = randomTileName();
+  }
 
   removeSelected(selectedLayers);
 
@@ -306,45 +320,67 @@ function selectionToComp(){
   }
 }
 
+//find shape layer in collection
+function findShapeLayer(collection){
+  for (var i = 1; i <= collection.length; i++) {
+    if (collection[i].name == "Shape Layer 1") {
+      return collection[i];
+    }
+  }
+}
+
+//change thickness of stroke
+function changeStrokeThickness(comp){
+  var source = comp.source;
+  var shape = findShapeLayer(source.layers);
+  shape.property("Contents").property("Stroke 1").property("Stroke Width").setValue(parseInt(borderWidth.text));
+}
+
 //</editor-fold>
 
-var myWin = new Window("palette", "anyTileMaker v0.1", undefined);
+var myWin = new Window("palette", "anyTileMaker v0.2", undefined);
     myWin.orientation = "column";
 
-    myWin.add("statictext", undefined, "Enter the amount of selectable solids below:");
+    var panelOne = myWin.add("panel", undefined, "Step 1:");
+    var panelTwo = myWin.add("panel", undefined, "Step 2:");
+    var panelTree = myWin.add("panel", undefined, "Step 3:");
 
-    var groupSolids = myWin.add("group", undefined, "groupSolids");
+    panelOne.add("statictext", undefined, "Enter the amount of selectable solids below:");
+
+    var groupSolids = panelOne.add("group", undefined, "groupSolids");
         groupSolids.orientation = "column";
 
         var groupSolidsX = groupSolids.add("group", undefined, "groupSolidsX");
             groupSolidsX.orientation = "row";
             groupSolidsX.add("statictext", undefined, "solids along X");
-            var amountXinput = groupSolidsX.add("edittext", [0,0,25,25], "2");
+            var amountXinput = groupSolidsX.add("edittext", [0,0,25,20], "2");
 
         var groupSolidsY = groupSolids.add("group", undefined, "groupSolidsY");
             groupSolidsY.orientation = "row";
             groupSolidsY.add("statictext", undefined, "solids along Y");
-            var amountYinput = groupSolidsY.add("edittext", [0,0,25,25], "2");
+            var amountYinput = groupSolidsY.add("edittext", [0,0,25,20], "2");
 
-    var createSolidsBtn = myWin.add("button", undefined, "create solids");
+    var createSolidsBtn = panelOne.add("button", undefined, "create solids");
 
+    panelTwo.add("statictext", undefined, "Select the solids you want to convert\nand hit the next button:",{multiline:true});
 
-    myWin.add("statictext", undefined, "Select the solids you want to convert");
-    myWin.add("statictext", undefined, "and hit the next button:");
-
-    var convertToCompBtn = myWin.add("button", undefined, "convert to comp");
-
-    var borderWidthGroup = myWin.add("group", undefined, "groupSolidsX");
+    var borderWidthGroup = panelTwo.add("group", undefined, "groupSolidsX");
         borderWidthGroup.orientation = "row";
         borderWidthGroup.add("statictext", undefined, "border width:");
         var borderWidth = borderWidthGroup.add("edittext", [0,0,25,25], "10");
 
-    var groupChecks = myWin.add("group", undefined, "groupChecks");
+    var groupChecks = panelTwo.add("group", undefined, "groupChecks");
         groupChecks.orientation = "row";
         var createBorderOption = groupChecks.add("checkbox", undefined, "create border");
         createBorderOption.value = 1;
         var detectEdgesOption = groupChecks.add("checkbox", undefined, "auto detect edged");
         detectEdgesOption.value = 1;
+
+    var convertToCompBtn = panelTwo.add("button", undefined, "convert to comp");
+
+    panelTree.add("statictext", undefined, "Click the button below to adjust\nborder width of selected tiles",{multiline:true});
+
+    var changeBorderBtn = panelTree.add("button", undefined, "change border");
 
 
 myWin.center();
@@ -366,6 +402,20 @@ convertToCompBtn.onClick = function(){
     try {
       setVariables();
       selectionToComp();
+    } catch (e) {
+      alert("Error in line: " + e.line + "\n" + e.toString());
+    }
+  app.endUndoGroup();
+}
+
+changeBorderBtn.onClick = function(){
+  app.beginUndoGroup("anyTileMaker - change border");
+    try {
+      setVariables();
+      var selectedLayers = activeItem.selectedLayers;
+      for (var i = 0; i < selectedLayers.length; i++) {
+        changeStrokeThickness(selectedLayers[i]);
+      }
     } catch (e) {
       alert("Error in line: " + e.line + "\n" + e.toString());
     }
