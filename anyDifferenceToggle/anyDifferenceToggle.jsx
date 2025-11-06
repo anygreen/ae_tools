@@ -16,7 +16,8 @@ function myScript(thisObj){
         // Use resource string for better layout control
         res = "group{orientation:'column', alignChildren:'center', spacing:10, margins:16,\
                 toggleBtn: Button{text:'Toggle Difference', preferredSize:[150,-1]},\
-                guideCheckbox: Checkbox{text:'make Guide'},\
+                guideCheckbox: Checkbox{text:'make Guide', value:true},\
+                statusText: StaticText{text:'', justify:'center', preferredSize:[200,20]},\
                 spacer: Panel{preferredSize:[-1,10]},\
                 deleteGuideBtn: Button{text:'Delete Guide Layers', preferredSize:[150,-1]},\
               }";
@@ -34,6 +35,18 @@ function myScript(thisObj){
         /////////////////
         //THE SCRIPTING//
         /////////////////
+        
+        // Helper function to set status message with auto-clear
+        function setStatus(text, delay) {
+            delay = delay || 2000;
+            myPanel.grp.statusText.text = text;
+            $.sleep(delay);
+            myPanel.grp.statusText.text = "";
+        }
+        
+        function clearStatus() {
+            myPanel.grp.statusText.text = "";
+        }
         
         // Toggle Difference Button Click Handler
         myPanel.grp.toggleBtn.onClick = function() {
@@ -107,7 +120,7 @@ function myScript(thisObj){
                 
                 // Confirm deletion if guide layers exist
                 if (guideLayers.length === 0) {
-                    alert("No guide layers found in the active composition.");
+                    setStatus("No guide layers found");
                     return;
                 }
                 
@@ -121,7 +134,7 @@ function myScript(thisObj){
                     guideLayers[j].remove();
                 }
                 
-                alert("Deleted " + guideLayers.length + " guide layer(s).");
+                setStatus("Deleted " + guideLayers.length + " guide layer(s)");
                 
             } catch (error) {
                 alert("Error: " + error.message);
