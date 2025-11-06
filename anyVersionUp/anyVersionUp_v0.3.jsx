@@ -132,20 +132,25 @@
         group.orientation = "row";
         group.alignChildren = ["left", "center"];
         group.spacing = 0; // Remove spacing between elements
+        group.margins = 0; // Remove margins
         
         // Split the name into parts for highlighting
         var parts = name.split('_');
-        var isFirst = true;
         
         for (var i = 0; i < parts.length; i++) {
-            if (!isFirst) {
+            if (i > 0) {
                 var separator = group.add("statictext", undefined, "_");
-                separator.characters = 1; // Ensure exact width for underscore
+                separator.margins = 0;
             }
             
             var part = parts[i];
-            var text = group.add("statictext", undefined, part);
-            text.characters = part.length; // Set exact width based on content
+            var textGroup = group.add("group");
+            textGroup.orientation = "row";
+            textGroup.spacing = 0;
+            textGroup.margins = 0;
+            
+            var text = textGroup.add("statictext", undefined, part);
+            text.margins = 0;
             
             // Only highlight changed parts in the new version
             if (!isOld && ((result.dateInfo && i === result.dateInfo.index) || 
@@ -153,8 +158,6 @@
                 text.graphics.foregroundColor = text.graphics.newPen(text.graphics.PenType.SOLID_COLOR, [1, 0, 0], 1);
                 text.graphics.font = ScriptUI.newFont(text.graphics.font.name, "Bold", text.graphics.font.size);
             }
-            
-            isFirst = false;
         }
     }
 
@@ -162,17 +165,21 @@
         var group = container.add("group");
         group.orientation = "column";
         group.alignChildren = ["left", "top"];
+        group.spacing = 4; // Minimal spacing between lines
+        group.margins = 0;
         group.maximumSize.width = 800; // Make it wide enough for long names
         
         var titleText = group.add("statictext", undefined, label + ":");
         titleText.graphics.font = ScriptUI.newFont(titleText.graphics.font.name, "Bold", titleText.graphics.font.size);
+        titleText.margins = 0;
         
         for (var i = 0; i < names.length; i++) {
             createHighlightedText(group, true, names[i], results[i]);
         }
         
         if (names.length > 0) {
-            group.add("panel", undefined, undefined, {height: 2}); // Separator
+            var separator = group.add("panel", undefined, undefined, {height: 2}); // Separator
+            separator.margins = 0;
             
             for (var i = 0; i < names.length; i++) {
                 createHighlightedText(group, false, results[i].newName, results[i]);
