@@ -263,6 +263,16 @@
 
             createComparisonGroup(modal, "Compositions", oldNames, results);
 
+            // Add move to _old checkbox
+            var moveGroup = modal.add("group");
+            moveGroup.orientation = "row";
+            moveGroup.alignment = ["left", "top"];
+            moveGroup.spacing = 10;
+            moveGroup.margins = 0;
+
+            var moveToOldCheckbox = moveGroup.add("checkbox", undefined, "Move to _old");
+            moveToOldCheckbox.value = true; // Enabled by default
+
             var buttonGroup = modal.add("group");
             buttonGroup.orientation = "row";
             buttonGroup.alignment = ["center", "top"];
@@ -278,9 +288,42 @@
 
             if (modal.show() === 1) {
                 app.beginUndoGroup("Version Up Compositions");
+                
+                // Process each composition
                 for (var i = 0; i < selectedComps.length; i++) {
-                    var newComp = selectedComps[i].duplicate();
+                    var comp = selectedComps[i];
+                    var newComp = comp.duplicate();
                     newComp.name = results[i].newName;
+
+                    // Handle moving to _old folder if checkbox is checked
+                    if (moveToOldCheckbox.value) {
+                        // Get current parent folder of the comp
+                        var parentFolder = comp.parentFolder;
+                        var oldFolder = null;
+
+                        // Search for _old folder in the same level as the comp
+                        for (var j = 1; j <= app.project.numItems; j++) {
+                            var item = app.project.item(j);
+                            if (item instanceof FolderItem && 
+                                item.name === "_old" && 
+                                item.parentFolder === parentFolder) {
+                                oldFolder = item;
+                                break;
+                            }
+                        }
+
+                        // Create _old folder if it doesn't exist
+                        if (!oldFolder) {
+                            oldFolder = app.project.items.addFolder("_old");
+                            // If comp is in a folder, put _old folder in the same parent
+                            if (parentFolder) {
+                                oldFolder.parentFolder = parentFolder;
+                            }
+                        }
+
+                        // Move the old comp to _old folder
+                        comp.parentFolder = oldFolder;
+                    }
                 }
                 app.endUndoGroup();
             }
