@@ -165,7 +165,7 @@
     var initialsLabel = initialsGroup.add("statictext", undefined, "Initials:");
     var initialsInput = initialsGroup.add("edittext", undefined, "");
     initialsInput.characters = 2;
-    initialsInput.preferredSize.width = 30;
+    initialsInput.preferredSize.width = 45;
 
     // Load saved initials
     if (app.settings.haveSetting("anyVersionUp", "initials")) {
@@ -421,12 +421,20 @@
         }
     };
 
+    // Setup Panel Sizing
+    panel.layout.layout(true);
+    mainGroup.minimumSize = mainGroup.size;
+
+    // Make the panel resizeable
+    panel.layout.resize();
+    panel.onResizing = panel.onResize = function() {
+        this.layout.resize();
+    };
+
     // Layout and show the panel
     if (panel instanceof Window) {
         panel.center();
         panel.show();
-    } else {
-        panel.layout.layout(true);
     }
 
 })(this);
