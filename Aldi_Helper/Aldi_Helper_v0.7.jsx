@@ -1,11 +1,15 @@
 (function createUI(thisObj) {
-    var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", "Aldi Helper v0.7", undefined);
-    panel.orientation = "column";
+    var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", "Aldi Helper v0.7", undefined, {resizeable: true});
+
+    // Create main group wrapper
+    var mainGroup = panel.add("group", undefined);
+    mainGroup.orientation = "column";
+    mainGroup.alignment = ["fill", "fill"];
 
     // Create buttons
-    var markerRevealButton = panel.add("button", undefined, "Marker Reveal");
-    var popInButton = panel.add("button", undefined, "Pop In");
-    var easyMorphButton = panel.add("button", undefined, "Easy Morph");
+    var markerRevealButton = mainGroup.add("button", undefined, "Marker Reveal");
+    var popInButton = mainGroup.add("button", undefined, "Pop In");
+    var easyMorphButton = mainGroup.add("button", undefined, "Easy Morph");
     markerRevealButton.size = popInButton.size = easyMorphButton.size = [120, 30];
 
     markerRevealButton.onClick = function() {
@@ -80,7 +84,7 @@
         }
     };
 
-    var doohOffsetButton = panel.add("button", undefined, "DOOH Offset");
+    var doohOffsetButton = mainGroup.add("button", undefined, "DOOH Offset");
     doohOffsetButton.size = [120, 30];
 
     doohOffsetButton.onClick = function() {
@@ -107,8 +111,16 @@
         }
     };
 
+    // Setup Panel Sizing
     panel.layout.layout(true);
+    mainGroup.minimumSize = mainGroup.size;
+
+    // Make the panel resizeable
     panel.layout.resize();
+    panel.onResizing = panel.onResize = function() {
+        this.layout.resize();
+    };
+
     if (!(thisObj instanceof Panel)) {
         panel.center();
         panel.show();
@@ -197,6 +209,9 @@ function createEasyMorph(comp, selectedLayers) {
         refScale = [scaleX, scaleY];
         mainScaleValue = [100, 100];
     }
+
+    // Enable motion blur on main layer
+    mainLayer.motionBlur = true;
 
     // Create easing objects (66% incoming, 44% outgoing)
     var easeIn = new KeyframeEase(0, 66);
