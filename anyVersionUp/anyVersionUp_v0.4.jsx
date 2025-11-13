@@ -377,11 +377,14 @@
             if (modal.show() === 1) {
                 app.beginUndoGroup("Version Up Compositions");
 
+                var newComps = [];
+
                 // Process each composition
                 for (var i = 0; i < selectedComps.length; i++) {
                     var comp = selectedComps[i];
                     var newComp = comp.duplicate();
                     newComp.name = results[i].newName;
+                    newComps.push(newComp);
 
                     // Handle moving to _old folder if checkbox is checked
                     if (moveToOldCheckbox.value) {
@@ -413,6 +416,15 @@
                         comp.parentFolder = oldFolder;
                     }
                 }
+
+                // Deselect old comps and select new comps
+                for (var i = 0; i < selectedComps.length; i++) {
+                    selectedComps[i].selected = false;
+                }
+                for (var i = 0; i < newComps.length; i++) {
+                    newComps[i].selected = true;
+                }
+
                 app.endUndoGroup();
             }
 
