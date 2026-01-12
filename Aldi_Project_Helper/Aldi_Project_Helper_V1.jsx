@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.1.1";
+    var SCRIPT_VERSION = "v1.3.2";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -393,6 +393,132 @@
         }
     }
 
+    /**
+     * Gets the current date as YYMMDD string
+     * @returns {string} Date string in YYMMDD format
+     */
+    function getRenderDateFolder() {
+        var date = new Date();
+        var year = (date.getFullYear() % 100).toString();
+        if (year.length < 2) year = "0" + year;
+        var month = (date.getMonth() + 1).toString();
+        if (month.length < 2) month = "0" + month;
+        var day = date.getDate().toString();
+        if (day.length < 2) day = "0" + day;
+        return year + month + day;
+    }
+
+    /**
+     * Gets the current time rounded to nearest 5 minutes as HHhMM string
+     * @returns {string} Time string in HHhMM format (e.g., "14h45")
+     */
+    function getRenderTimeFolder() {
+        var date = new Date();
+        var hours = date.getHours();
+        var minutes = date.getMinutes();
+
+        // Round to nearest 5 minutes
+        minutes = Math.round(minutes / 5) * 5;
+
+        // Handle overflow (e.g., 57 minutes rounds to 60)
+        if (minutes === 60) {
+            minutes = 0;
+            hours++;
+            if (hours === 24) {
+                hours = 0;
+            }
+        }
+
+        var hoursStr = hours.toString();
+        if (hoursStr.length < 2) hoursStr = "0" + hoursStr;
+        var minutesStr = minutes.toString();
+        if (minutesStr.length < 2) minutesStr = "0" + minutesStr;
+
+        return hoursStr + "h" + minutesStr;
+    }
+
+    /**
+     * Copies text to clipboard using system commands
+     * @param {string} text - Text to copy
+     * @returns {boolean} True if successful
+     */
+    function copyToClipboard(text) {
+        try {
+            if (IS_MAC) {
+                // On Mac, use pbcopy
+                system.callSystem('echo "' + text.replace(/"/g, '\\"') + '" | pbcopy');
+            } else {
+                // On Windows, use clip
+                system.callSystem('echo ' + text + '| clip');
+            }
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Shows a dialog with a copyable path
+     * @param {string} title - Dialog title
+     * @param {string} message - Message to display
+     * @param {string} path - Path to show in copyable field
+     */
+    function showPathDialog(title, message, path) {
+        var dialog = new Window("dialog", title);
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "top"];
+        dialog.preferredSize.width = 500;
+
+        var msgText = dialog.add("statictext", undefined, message, {multiline: true});
+        msgText.preferredSize = [480, 40];
+
+        var pathField = dialog.add("edittext", undefined, path, {readonly: true});
+        pathField.preferredSize = [480, 25];
+
+        var okBtn = dialog.add("button", undefined, "OK", {name: "ok"});
+        okBtn.onClick = function() { dialog.close(); };
+
+        dialog.show();
+    }
+
+    /**
+     * Shows a confirmation dialog with custom width for better display of long text
+     * @param {string} title - Dialog title
+     * @param {string} message - Message to display
+     * @param {number} width - Dialog width in pixels (default 500)
+     * @returns {boolean} True if user clicked OK/Yes, false if Cancel/No
+     */
+    function showWideConfirmDialog(title, message, width) {
+        width = width || 500;
+
+        var dialog = new Window("dialog", title);
+        dialog.orientation = "column";
+        dialog.alignChildren = ["fill", "top"];
+        dialog.preferredSize.width = width;
+
+        // Add scrollable text area for long messages
+        var textGroup = dialog.add("group");
+        textGroup.orientation = "column";
+        textGroup.alignChildren = ["fill", "fill"];
+        textGroup.preferredSize = [width - 40, 300];
+
+        var textArea = textGroup.add("edittext", undefined, message, {multiline: true, readonly: true, scrolling: true});
+        textArea.preferredSize = [width - 40, 280];
+
+        // Button group
+        var buttonGroup = dialog.add("group");
+        buttonGroup.orientation = "row";
+        buttonGroup.alignment = ["center", "top"];
+
+        var okBtn = buttonGroup.add("button", undefined, "Sync", {name: "ok"});
+        var cancelBtn = buttonGroup.add("button", undefined, "Cancel", {name: "cancel"});
+
+        okBtn.onClick = function() { dialog.close(1); };
+        cancelBtn.onClick = function() { dialog.close(0); };
+
+        return dialog.show() === 1;
+    }
+
     // ============================================================
     // HELPER FUNCTIONS - FTP Operations
     // ============================================================
@@ -537,20 +663,28 @@
 
     /**
      * Executes a shell command and returns the output
+     * Uses system.callSystem which works directly in After Effects
+     * On Mac: Call command directly (like Terminal)
+     * On Windows: Use cmd /c prefix
      * @param {string} command - Command to execute
      * @returns {string} Command output
      */
     function executeCommand(command) {
-        if (IS_MAC) {
-            // On Mac, use AppleScript to run shell commands
-            return app.doScript(
-                'do shell script "' + command.replace(/"/g, '\\"') + '"',
-                ScriptLanguage.APPLESCRIPT
-            );
-        } else {
-            // On Windows, use cmd
-            return system.callSystem('cmd /c "' + command.replace(/"/g, '""') + '"');
+        var result = "";
+
+        try {
+            if (IS_MAC) {
+                // On Mac, system.callSystem works like Terminal - call directly
+                result = system.callSystem(command);
+            } else {
+                // On Windows, need to use cmd /c to execute commands
+                result = system.callSystem('cmd /c "' + command.replace(/"/g, '""') + '"');
+            }
+        } catch (e) {
+            result = "";
         }
+
+        return result || "";
     }
 
     /**
@@ -676,7 +810,8 @@
             localDir.create();
         }
 
-        var command = "curl -s --user " + ftpConfig.username + ":" + ftpConfig.password +
+        // Use -R to preserve remote file's modification time
+        var command = "curl -s -R --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " -o \"" + localPath + "\" \"" + url + "\"";
 
         try {
@@ -688,7 +823,33 @@
     }
 
     /**
-     * Uploads a file to FTP
+     * Formats a Date object for FTP MFMT command (YYYYMMDDHHMMSS) in UTC
+     * @param {Date} date - Date object to format
+     * @returns {string} Formatted timestamp string in UTC
+     */
+    function formatFTPTimestampUTC(date) {
+        var year = date.getUTCFullYear().toString();
+        var month = padNumber(date.getUTCMonth() + 1, 2);
+        var day = padNumber(date.getUTCDate(), 2);
+        var hours = padNumber(date.getUTCHours(), 2);
+        var minutes = padNumber(date.getUTCMinutes(), 2);
+        var seconds = padNumber(date.getUTCSeconds(), 2);
+        return year + month + day + hours + minutes + seconds;
+    }
+
+    /**
+     * Extracts just the filename from a path
+     * @param {string} path - Full path
+     * @returns {string} Just the filename
+     */
+    function getFilenameFromPath(path) {
+        var parts = path.replace(/\\/g, "/").split("/");
+        return parts[parts.length - 1];
+    }
+
+    /**
+     * Uploads a file to FTP and attempts to preserve its modification time
+     * Tries MFMT command first, then SITE UTIME as fallback
      * @param {Object} ftpConfig - FTP connection config
      * @param {string} localPath - Local file path
      * @param {string} remotePath - Destination path on FTP server
@@ -698,9 +859,37 @@
         var port = ftpConfig.port || "21";
         var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath;
 
+        // Get local file's modification time
+        var localFile = new File(localPath);
+        var modTimeUTC = "";
+        if (localFile.exists) {
+            modTimeUTC = formatFTPTimestampUTC(new Date(localFile.modified));
+        }
+
+        // Get just the filename for the MFMT command (some servers need this)
+        var filename = getFilenameFromPath(remotePath);
+
         // Create remote directory structure using --ftp-create-dirs
+        // Use -Q with "-" prefix to send commands after upload
+        // Use "*" prefix to allow command to fail silently (server may not support it)
         var command = "curl -s --user " + ftpConfig.username + ":" + ftpConfig.password +
-                      " --ftp-create-dirs -T \"" + localPath + "\" \"" + url + "\"";
+                      " --ftp-create-dirs";
+
+        // Try multiple methods to set modification time:
+        // 1. MFMT with full path (standard)
+        // 2. MFMT with just filename (some servers need this after upload)
+        // 3. SITE UTIME (alternative command some servers support)
+        // The "*" prefix allows the command to fail without stopping the operation
+        if (modTimeUTC) {
+            // Try MFMT with full path first
+            command += " -Q \"-*MFMT " + modTimeUTC + " /" + remotePath + "\"";
+            // Also try MFMT with just filename
+            command += " -Q \"-*MFMT " + modTimeUTC + " " + filename + "\"";
+            // Try SITE UTIME as fallback (format: SITE UTIME filename accesstime modtime createtime UTC)
+            command += " -Q \"-*SITE UTIME " + filename + " " + modTimeUTC + " " + modTimeUTC + " " + modTimeUTC + " UTC\"";
+        }
+
+        command += " -T \"" + localPath + "\" \"" + url + "\"";
 
         try {
             executeCommand(command);
@@ -1089,6 +1278,18 @@
     var sep5 = mainGroup.add("panel", undefined, undefined, {borderStyle: "sunken"});
     sep5.alignment = ["fill", "top"];
 
+    // ---- Render Section ----
+    var renderLabel = mainGroup.add("statictext", undefined, "Render:");
+    renderLabel.alignment = ["left", "top"];
+
+    var renderBtn = mainGroup.add("button", undefined, "Create Folders and Render");
+    renderBtn.alignment = ["fill", "top"];
+    renderBtn.helpTip = "Create date/time folders in 03_out and render queue items there";
+
+    // ---- Separator ----
+    var sep6 = mainGroup.add("panel", undefined, undefined, {borderStyle: "sunken"});
+    sep6.alignment = ["fill", "top"];
+
     // ---- FTP Sync Section ----
     var ftpSyncLabel = mainGroup.add("statictext", undefined, "FTP Sync:");
     ftpSyncLabel.alignment = ["left", "top"];
@@ -1119,21 +1320,14 @@
     progressGroup.alignChildren = ["fill", "top"];
     progressGroup.spacing = 5;
 
-    var progressFileLabel = progressGroup.add("statictext", undefined, "File: -");
-    progressFileLabel.alignment = ["fill", "top"];
-
-    var progressFileBar = progressGroup.add("progressbar", undefined, 0, 100);
-    progressFileBar.alignment = ["fill", "top"];
-    progressFileBar.preferredSize.height = 10;
-
-    var progressOverallLabel = progressGroup.add("statictext", undefined, "Overall: -");
+    var progressOverallLabel = progressGroup.add("statictext", undefined, "");
     progressOverallLabel.alignment = ["fill", "top"];
 
     var progressOverallBar = progressGroup.add("progressbar", undefined, 0, 100);
     progressOverallBar.alignment = ["fill", "top"];
     progressOverallBar.preferredSize.height = 10;
 
-    var progressStatusText = progressGroup.add("statictext", undefined, "Ready");
+    var progressStatusText = progressGroup.add("statictext", undefined, "");
     progressStatusText.alignment = ["fill", "top"];
 
     // ============================================================
@@ -1652,9 +1846,125 @@
         }
     };
 
+    // Render button
+    renderBtn.onClick = function() {
+        try {
+            // Check if there are active items in the render queue
+            var renderQueue = app.project.renderQueue;
+            var activeItems = [];
+
+            for (var i = 1; i <= renderQueue.numItems; i++) {
+                var item = renderQueue.item(i);
+                if (item.status === RQItemStatus.QUEUED) {
+                    activeItems.push(item);
+                }
+            }
+
+            if (activeItems.length === 0) {
+                alert("No active items in the render queue.\n\nPlease add compositions to the render queue and set them to 'Queued' status.");
+                return;
+            }
+
+            // Validate project selection for output path
+            if (!projectDropdown.selection) {
+                alert("Please select a project first to determine the output folder.");
+                return;
+            }
+
+            var projectIndex = projectDropdown.selection.index;
+            var projectPath = currentProjects[projectIndex].path;
+
+            // Build output folder path: [project]/06_vfx/03_out/YYMMDD/HHmm
+            var outBasePath = projectPath + "/06_vfx/03_out";
+            var dateFolder = getRenderDateFolder();
+            var timeFolder = getRenderTimeFolder();
+
+            var dateFolderPath = outBasePath + "/" + dateFolder;
+            var timeFolderPath = dateFolderPath + "/" + timeFolder;
+
+            // Check if base output folder exists
+            var outBaseFolder = new Folder(outBasePath);
+            if (!outBaseFolder.exists) {
+                alert("Output folder does not exist:\n" + outBasePath + "\n\nPlease create the folder structure first.");
+                return;
+            }
+
+            // Create date folder if needed
+            var dateFolderObj = new Folder(dateFolderPath);
+            if (!dateFolderObj.exists) {
+                if (!dateFolderObj.create()) {
+                    alert("Failed to create date folder:\n" + dateFolderPath);
+                    return;
+                }
+            }
+
+            // Create time folder if needed
+            var timeFolderObj = new Folder(timeFolderPath);
+            if (!timeFolderObj.exists) {
+                if (!timeFolderObj.create()) {
+                    alert("Failed to create time folder:\n" + timeFolderPath);
+                    return;
+                }
+            }
+
+            // Update output paths for all active render items
+            var outputCount = 0;
+            for (var i = 0; i < activeItems.length; i++) {
+                var item = activeItems[i];
+
+                // Each render item can have multiple output modules
+                for (var j = 1; j <= item.numOutputModules; j++) {
+                    var outputModule = item.outputModule(j);
+                    var currentFile = outputModule.file;
+
+                    if (currentFile) {
+                        // Get just the filename from the current path
+                        var fileName = currentFile.name;
+                        var newFilePath = timeFolderPath + "/" + fileName;
+                        outputModule.file = new File(newFilePath);
+                        outputCount++;
+                    }
+                }
+            }
+
+            // Try to copy simplified path to clipboard (relative from project root)
+            var simplifiedPath = "/06_vfx/03_out/" + dateFolder + "/" + timeFolder;
+            var clipboardSuccess = copyToClipboard(simplifiedPath);
+
+            // Show confirmation
+            var confirmMsg = "Render Setup Complete\n\n";
+            confirmMsg += "Output folder:\n" + simplifiedPath + "\n\n";
+            confirmMsg += "Active items: " + activeItems.length + "\n";
+            confirmMsg += "Output modules updated: " + outputCount + "\n\n";
+
+            if (clipboardSuccess) {
+                confirmMsg += "Path copied to clipboard!\n\n";
+            }
+
+            confirmMsg += "Start rendering now?";
+
+            if (confirm(confirmMsg)) {
+                // Start rendering
+                renderQueue.render();
+            } else if (!clipboardSuccess) {
+                // Show path dialog if clipboard failed and user cancelled render
+                showPathDialog("Output Path", "Copy the output path:", simplifiedPath);
+            }
+
+        } catch (error) {
+            alert("Error in Render:\n" + error.message + "\nLine: " + error.line);
+        }
+    };
+
     // Sync button
     syncBtn.onClick = function() {
         try {
+            // Reset progress display
+            progressOverallBar.value = 0;
+            progressOverallLabel.text = "";
+            progressStatusText.text = "";
+            panel.layout.layout(true);
+
             // Validate project selection
             if (!projectDropdown.selection) {
                 alert("Please select a project first.");
@@ -1671,6 +1981,23 @@
                 alert("No FTP connection configured for project:\n" + projectName +
                       "\n\nPlease add a connection in:\n" + FTP_CONFIG_FILE);
                 return;
+            }
+
+            // Test FTP connection with a simple command
+            progressStatusText.text = "Connecting to FTP...";
+            panel.layout.layout(true);
+
+            var testPort = ftpConfig.port || "21";
+            var testUrl = "ftp://" + ftpConfig.hostname + ":" + testPort + "/";
+            var testCommand = "curl -s -l --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
+
+            var testResult = executeCommand(testCommand);
+
+            if (!testResult || testResult.length === 0) {
+                if (!confirm("FTP connection test returned no data.\nThis might indicate a connection issue.\n\nContinue anyway?")) {
+                    progressStatusText.text = "";
+                    return;
+                }
             }
 
             // Determine sync location
@@ -1723,7 +2050,7 @@
 
             if (allDateFolders.length === 0) {
                 alert("No date folders found to sync.");
-                progressStatusText.text = "Ready";
+                progressStatusText.text = "";
                 return;
             }
 
@@ -1763,79 +2090,46 @@
                 }
             }
 
-            // Debug: Show what was found
-            var debugMsg = "DEBUG INFO:\n\n";
-            debugMsg += "Local files found: " + allLocalFiles.length + "\n";
-            debugMsg += "Remote files found: " + allRemoteFiles.length + "\n\n";
-
-            if (allLocalFiles.length > 0) {
-                debugMsg += "Sample local paths:\n";
-                for (var d = 0; d < Math.min(3, allLocalFiles.length); d++) {
-                    debugMsg += "  " + allLocalFiles[d].relativePath + "\n";
-                }
-            }
-
-            if (allRemoteFiles.length > 0) {
-                debugMsg += "\nSample remote paths:\n";
-                for (var d = 0; d < Math.min(3, allRemoteFiles.length); d++) {
-                    debugMsg += "  " + allRemoteFiles[d].relativePath + "\n";
-                }
-            }
-
-            // Show debug info - remove this alert once debugging is complete
-            alert(debugMsg);
-
             // Compare files
+            progressStatusText.text = "";
+            panel.layout.layout(true);
             var syncActions = compareSyncFiles(allLocalFiles, allRemoteFiles);
 
             if (syncActions.toUpload.length === 0 && syncActions.toDownload.length === 0) {
                 alert("Everything is already in sync!\n\nFolders checked: " + allDateFolders.join(", "));
-                progressStatusText.text = "Ready - All synced";
+                progressStatusText.text = "";
+                progressOverallLabel.text = "";
                 return;
             }
 
             // Build confirmation message
-            var confirmMsg = "FTP Sync Summary\n";
-            confirmMsg += "================\n\n";
-            confirmMsg += "Folders: " + allDateFolders.join(", ") + "\n\n";
+            var confirmMsg = "Folders: " + allDateFolders.join(", ") + "\n\n";
 
             if (syncActions.toUpload.length > 0) {
                 confirmMsg += "FILES TO UPLOAD (" + syncActions.toUpload.length + "):\n";
-                for (var i = 0; i < Math.min(syncActions.toUpload.length, 10); i++) {
+                for (var i = 0; i < Math.min(syncActions.toUpload.length, 15); i++) {
                     confirmMsg += "  + " + syncActions.toUpload[i].relativePath + "\n";
                 }
-                if (syncActions.toUpload.length > 10) {
-                    confirmMsg += "  ... and " + (syncActions.toUpload.length - 10) + " more\n";
+                if (syncActions.toUpload.length > 15) {
+                    confirmMsg += "  ... and " + (syncActions.toUpload.length - 15) + " more\n";
                 }
                 confirmMsg += "\n";
             }
 
             if (syncActions.toDownload.length > 0) {
                 confirmMsg += "FILES TO DOWNLOAD (" + syncActions.toDownload.length + "):\n";
-                for (var i = 0; i < Math.min(syncActions.toDownload.length, 10); i++) {
+                for (var i = 0; i < Math.min(syncActions.toDownload.length, 15); i++) {
                     confirmMsg += "  - " + syncActions.toDownload[i].relativePath + "\n";
                 }
-                if (syncActions.toDownload.length > 10) {
-                    confirmMsg += "  ... and " + (syncActions.toDownload.length - 10) + " more\n";
+                if (syncActions.toDownload.length > 15) {
+                    confirmMsg += "  ... and " + (syncActions.toDownload.length - 15) + " more\n";
                 }
             }
 
-            confirmMsg += "\nProceed with sync?";
-
-            if (!confirm(confirmMsg)) {
-                progressStatusText.text = "Sync cancelled";
+            if (!showWideConfirmDialog("FTP Sync Summary", confirmMsg, 600)) {
+                progressStatusText.text = "";
+                progressOverallLabel.text = "";
                 return;
-            }
-
-            // Calculate total size for progress
-            var totalSize = 0;
-            var processedSize = 0;
-
-            for (var i = 0; i < syncActions.toUpload.length; i++) {
-                totalSize += syncActions.toUpload[i].size || 1000; // Default size if unknown
-            }
-            for (var i = 0; i < syncActions.toDownload.length; i++) {
-                totalSize += 1000; // Estimate for downloads
             }
 
             var totalFiles = syncActions.toUpload.length + syncActions.toDownload.length;
@@ -1844,51 +2138,43 @@
             // Perform uploads
             for (var i = 0; i < syncActions.toUpload.length; i++) {
                 var fileInfo = syncActions.toUpload[i];
-                progressFileLabel.text = "Uploading: " + fileInfo.relativePath;
-                progressFileBar.value = 0;
-                progressOverallLabel.text = "Overall: " + (processedFiles + 1) + " / " + totalFiles;
+
+                // Update progress at START of each file (show we're working on this file)
+                progressOverallBar.value = (processedFiles / totalFiles) * 100;
+                progressOverallLabel.text = "Uploading " + (processedFiles + 1) + " / " + totalFiles;
+                progressStatusText.text = fileInfo.relativePath;
                 panel.layout.layout(true);
 
                 var success = uploadFTPFile(ftpConfig, fileInfo.fullLocalPath, fileInfo.fullRemotePath);
-
                 processedFiles++;
-                processedSize += fileInfo.size || 1000;
-                progressFileBar.value = 100;
-                progressOverallBar.value = (processedSize / totalSize) * 100;
-                panel.layout.layout(true);
 
                 if (!success) {
-                    progressStatusText.text = "Error uploading: " + fileInfo.relativePath;
+                    progressStatusText.text = "Error: " + fileInfo.relativePath;
                 }
             }
 
             // Perform downloads
             for (var i = 0; i < syncActions.toDownload.length; i++) {
                 var fileInfo = syncActions.toDownload[i];
-                progressFileLabel.text = "Downloading: " + fileInfo.relativePath;
-                progressFileBar.value = 0;
-                progressOverallLabel.text = "Overall: " + (processedFiles + 1) + " / " + totalFiles;
+
+                // Update progress at START of each file
+                progressOverallBar.value = (processedFiles / totalFiles) * 100;
+                progressOverallLabel.text = "Downloading " + (processedFiles + 1) + " / " + totalFiles;
+                progressStatusText.text = fileInfo.relativePath;
                 panel.layout.layout(true);
 
                 var success = downloadFTPFile(ftpConfig, fileInfo.fullRemotePath, fileInfo.fullLocalPath);
-
                 processedFiles++;
-                processedSize += 1000;
-                progressFileBar.value = 100;
-                progressOverallBar.value = (processedSize / totalSize) * 100;
-                panel.layout.layout(true);
 
                 if (!success) {
-                    progressStatusText.text = "Error downloading: " + fileInfo.relativePath;
+                    progressStatusText.text = "Error: " + fileInfo.relativePath;
                 }
             }
 
             // Done
-            progressFileLabel.text = "File: Complete";
-            progressOverallLabel.text = "Overall: " + totalFiles + " / " + totalFiles;
-            progressFileBar.value = 100;
+            progressOverallLabel.text = "Complete: " + totalFiles + " files";
             progressOverallBar.value = 100;
-            progressStatusText.text = "Sync complete! " + syncActions.toUpload.length + " uploaded, " + syncActions.toDownload.length + " downloaded";
+            progressStatusText.text = syncActions.toUpload.length + " uploaded, " + syncActions.toDownload.length + " downloaded";
             panel.layout.layout(true);
 
             alert("Sync complete!\n\n" +
