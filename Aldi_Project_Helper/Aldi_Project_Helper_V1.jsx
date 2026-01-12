@@ -801,7 +801,9 @@
      */
     function downloadFTPFile(ftpConfig, remotePath, localPath) {
         var port = ftpConfig.port || "21";
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath;
+        // URL-encode the remote path for special characters (spaces, parentheses, etc.)
+        var encodedRemotePath = encodeURIPathForFTP(remotePath);
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         // Ensure local directory exists
         var localFile = new File(localPath);
@@ -811,15 +813,63 @@
         }
 
         // Use -R to preserve remote file's modification time
+        // Use --fail-early to detect errors
         var command = "curl -s -R --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " -o \"" + localPath + "\" \"" + url + "\"";
 
         try {
             executeCommand(command);
-            return new File(localPath).exists;
+            // Check if file was actually created and has content
+            var downloadedFile = new File(localPath);
+            return downloadedFile.exists && downloadedFile.length > 0;
         } catch (e) {
             return false;
         }
+    }
+
+    /**
+     * Encodes a path for use in FTP URLs
+     * Encodes special characters like spaces, parentheses, etc.
+     * Preserves forward slashes as path separators
+     * @param {string} path - Path to encode
+     * @returns {string} URL-encoded path
+     */
+    function encodeURIPathForFTP(path) {
+        // Split by slashes, encode each part, rejoin
+        var parts = path.split("/");
+        var encodedParts = [];
+        for (var i = 0; i < parts.length; i++) {
+            encodedParts.push(encodeURIComponentSimple(parts[i]));
+        }
+        return encodedParts.join("/");
+    }
+
+    /**
+     * Simple URI component encoder for ExtendScript
+     * Encodes characters that are problematic in URLs
+     * @param {string} str - String to encode
+     * @returns {string} Encoded string
+     */
+    function encodeURIComponentSimple(str) {
+        var result = "";
+        for (var i = 0; i < str.length; i++) {
+            var char = str.charAt(i);
+            var code = str.charCodeAt(i);
+
+            // Safe characters: A-Z, a-z, 0-9, - _ . ~
+            if ((code >= 65 && code <= 90) ||   // A-Z
+                (code >= 97 && code <= 122) ||  // a-z
+                (code >= 48 && code <= 57) ||   // 0-9
+                char === "-" || char === "_" || char === "." || char === "~") {
+                result += char;
+            } else {
+                // Encode as %XX
+                var hex = code.toString(16).toUpperCase();
+                if (hex.length === 1) hex = "0" + hex;
+                result += "%" + hex;
+            }
+        }
+        return result;
     }
 
     /**
@@ -857,7 +907,9 @@
      */
     function uploadFTPFile(ftpConfig, localPath, remotePath) {
         var port = ftpConfig.port || "21";
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath;
+        // URL-encode the remote path for special characters (spaces, parentheses, etc.)
+        var encodedRemotePath = encodeURIPathForFTP(remotePath);
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         // Get local file's modification time
         var localFile = new File(localPath);
