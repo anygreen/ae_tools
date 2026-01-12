@@ -1,0 +1,11 @@
+# Aldi Project Helper - FTP Connections
+# Format: Each connection block starts with [CONNECTION] and ends with [/CONNECTION]
+# Fields: project_folder, hostname, username, password, port (optional, default 21)
+
+[CONNECTION]
+project_folder=Aldi_V36_Jahresauftakt
+hostname=fra-clients.acht.studio
+username=lennert_exchange_jahresauftakt
+password=hJ7dsT5dsoe676
+port=21
+[/CONNECTION]
