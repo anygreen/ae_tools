@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.3.3";
+    var SCRIPT_VERSION = "v1.3.6";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -77,6 +77,32 @@
                date.getFullYear() + " " +
                padNumber(date.getHours(), 2) + ":" +
                padNumber(date.getMinutes(), 2);
+    }
+
+    /**
+     * Gets the modification date of a file using system commands
+     * More reliable than ExtendScript's File.modified property
+     * @param {string} filePath - Full path to the file
+     * @returns {string} Formatted date string (DD.MM.YYYY HH:MM) or empty string on error
+     */
+    function getFileModificationDate(filePath) {
+        try {
+            var result = "";
+            if (IS_MAC) {
+                // Use stat on Mac to get formatted modification date
+                // -f "%Sm" = modification time, -t = format string
+                result = system.callSystem('stat -f "%Sm" -t "%d.%m.%Y %H:%M" "' + filePath + '"');
+            } else {
+                // Windows: use PowerShell to get modification date
+                // Escape double quotes in path and use double quotes for PowerShell string
+                var escapedPath = filePath.replace(/\\/g, "\\\\").replace(/"/g, '`"');
+                result = system.callSystem('powershell -command "(Get-Item \"' + escapedPath + '\").LastWriteTime.ToString(\"dd.MM.yyyy HH:mm\")"');
+            }
+            // Trim whitespace/newlines from result
+            return result.replace(/^\s+|\s+$/g, "");
+        } catch (e) {
+            return "";
+        }
     }
 
     /**
@@ -1281,7 +1307,8 @@
     recentFileNameText.graphics.font = ScriptUI.newFont(recentFileNameText.graphics.font.name, "Bold", recentFileNameText.graphics.font.size);
 
     var recentFileDateText = mainGroup.add("statictext", undefined, "");
-    recentFileDateText.alignment = ["left", "top"];
+    recentFileDateText.alignment = ["fill", "top"];
+    recentFileDateText.preferredSize = [-1, 20]; // Ensure height for text display
 
     // ---- File Action Buttons ----
     var fileActionGroup = mainGroup.add("group");
@@ -1512,17 +1539,12 @@
 
         if (currentMostRecentFile) {
             recentFileNameText.text = currentMostRecentFile.file.name;
-            // Display modification date if available
-            if (currentMostRecentFile.modDate && currentMostRecentFile.modDate instanceof Date) {
-                recentFileDateText.text = "Modified: " + formatDateReadable(currentMostRecentFile.modDate);
+            // Get modification date using system command (more reliable than ExtendScript)
+            var modDateStr = getFileModificationDate(currentMostRecentFile.file.fsName);
+            if (modDateStr) {
+                recentFileDateText.text = "Modified: " + modDateStr;
             } else {
-                // Try to get date directly from file as fallback
-                try {
-                    var fileDate = new Date(currentMostRecentFile.file.modified);
-                    recentFileDateText.text = "Modified: " + formatDateReadable(fileDate);
-                } catch (e) {
-                    recentFileDateText.text = "";
-                }
+                recentFileDateText.text = "";
             }
             openFileBtn.enabled = true;
             openFolderBtn.enabled = true;
