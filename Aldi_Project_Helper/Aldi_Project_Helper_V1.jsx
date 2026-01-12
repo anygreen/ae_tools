@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.0.0";
+    var SCRIPT_VERSION = "v1.1.1";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -26,6 +26,16 @@
 
     // Folders to exclude when scanning for .aep files
     var EXCLUDED_FOLDERS = ["Adobe After Effects Auto-Save"];
+
+    // FTP sync paths relative to project root
+    var FTP_INPUT_PATH = "01_inbox";
+    var FTP_OUTPUT_PATH = "06_vfx/03_out";
+
+    // FTP config file location
+    var FTP_CONFIG_FILE = "~/Documents/AldiProjectHelper_FTP.txt";
+
+    // Detect operating system
+    var IS_MAC = ($.os.indexOf("Mac") !== -1);
 
     // ============================================================
     // HELPER FUNCTIONS - General Utilities
@@ -384,6 +394,365 @@
     }
 
     // ============================================================
+    // HELPER FUNCTIONS - FTP Operations
+    // ============================================================
+
+    /**
+     * Loads FTP connections from the config file
+     * @returns {Array} Array of FTP connection objects
+     */
+    function loadFTPConfig() {
+        var configFile = new File(FTP_CONFIG_FILE);
+        var connections = [];
+
+        if (!configFile.exists) {
+            return connections;
+        }
+
+        configFile.open("r");
+        var content = configFile.read();
+        configFile.close();
+
+        // Parse the config file
+        var blocks = content.split("[CONNECTION]");
+        for (var i = 1; i < blocks.length; i++) {
+            var block = blocks[i];
+            var endIndex = block.indexOf("[/CONNECTION]");
+            if (endIndex !== -1) {
+                block = block.substring(0, endIndex);
+            }
+
+            var connection = {};
+            var lines = block.split("\n");
+            for (var j = 0; j < lines.length; j++) {
+                var line = lines[j].replace(/^\s+|\s+$/g, ""); // trim
+                if (line.indexOf("=") !== -1 && line.indexOf("#") !== 0) {
+                    var parts = line.split("=");
+                    var key = parts[0].replace(/^\s+|\s+$/g, "");
+                    var value = parts.slice(1).join("=").replace(/^\s+|\s+$/g, "");
+                    connection[key] = value;
+                }
+            }
+
+            if (connection.project_folder && connection.hostname) {
+                connections.push(connection);
+            }
+        }
+
+        return connections;
+    }
+
+    /**
+     * Finds FTP connection for a given project
+     * @param {string} projectName - Name of the project folder
+     * @returns {Object|null} FTP connection object or null
+     */
+    function getFTPConnectionForProject(projectName) {
+        var connections = loadFTPConfig();
+        for (var i = 0; i < connections.length; i++) {
+            if (connections[i].project_folder === projectName) {
+                return connections[i];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Checks if a folder name is a valid date format (YYMMDD - 6 digits)
+     * @param {string} name - Folder name to check
+     * @returns {boolean} True if valid date folder
+     */
+    function isDateFolder(name) {
+        return /^\d{6}$/.test(name);
+    }
+
+    /**
+     * Gets date folders from a directory, sorted by name descending (most recent first)
+     * @param {string} folderPath - Path to scan
+     * @returns {Array} Array of folder names that match date format
+     */
+    function getDateFolders(folderPath) {
+        var folder = new Folder(folderPath);
+        if (!folder.exists) return [];
+
+        var dateFolders = [];
+        var items = folder.getFiles();
+
+        for (var i = 0; i < items.length; i++) {
+            if (items[i] instanceof Folder && isDateFolder(items[i].name)) {
+                dateFolders.push(items[i].name);
+            }
+        }
+
+        // Sort descending (most recent first)
+        dateFolders.sort(function(a, b) {
+            return b.localeCompare(a);
+        });
+
+        return dateFolders;
+    }
+
+    /**
+     * Gets the N most recent date folders
+     * @param {string} folderPath - Path to scan
+     * @param {number} count - Number of folders to return
+     * @returns {Array} Array of folder names
+     */
+    function getLatestDateFolders(folderPath, count) {
+        var dateFolders = getDateFolders(folderPath);
+        return dateFolders.slice(0, count);
+    }
+
+    /**
+     * Recursively scans a folder and returns all files with relative paths
+     * @param {Folder} folder - Folder to scan
+     * @param {string} basePath - Base path for relative path calculation
+     * @param {Array} results - Array to store results
+     */
+    function scanFolderForFiles(folder, basePath, results) {
+        if (!folder.exists) return;
+
+        var items = folder.getFiles();
+        for (var i = 0; i < items.length; i++) {
+            var item = items[i];
+
+            // Skip hidden/system files
+            if (shouldSkipFile(item.name)) continue;
+
+            if (item instanceof Folder) {
+                scanFolderForFiles(item, basePath, results);
+            } else if (item instanceof File) {
+                var relativePath = item.fsName.replace(basePath, "").replace(/^[\/\\]/, "");
+                // Normalize path separators to forward slashes for comparison
+                relativePath = relativePath.replace(/\\/g, "/");
+                results.push({
+                    file: item,
+                    relativePath: relativePath,
+                    size: item.length,
+                    modified: new Date(item.modified)
+                });
+            }
+        }
+    }
+
+    /**
+     * Executes a shell command and returns the output
+     * @param {string} command - Command to execute
+     * @returns {string} Command output
+     */
+    function executeCommand(command) {
+        if (IS_MAC) {
+            // On Mac, use AppleScript to run shell commands
+            return app.doScript(
+                'do shell script "' + command.replace(/"/g, '\\"') + '"',
+                ScriptLanguage.APPLESCRIPT
+            );
+        } else {
+            // On Windows, use cmd
+            return system.callSystem('cmd /c "' + command.replace(/"/g, '""') + '"');
+        }
+    }
+
+    /**
+     * Lists files on FTP server using curl
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {string} remotePath - Path on FTP server
+     * @returns {Array} Array of file info objects
+     */
+    function listFTPFiles(ftpConfig, remotePath) {
+        var port = ftpConfig.port || "21";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
+
+        // Use curl to list directory recursively
+        var command = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+
+        try {
+            var output = executeCommand(command);
+            var files = [];
+            var lines = output.split("\n");
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].replace(/^\s+|\s+$/g, "");
+                if (line.length > 0) {
+                    files.push(line);
+                }
+            }
+
+            return files;
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * Checks if a filename should be skipped (system/hidden files)
+     * @param {string} name - Filename to check
+     * @returns {boolean} True if should be skipped
+     */
+    function shouldSkipFile(name) {
+        // Skip . and .. directory entries
+        if (name === "." || name === "..") return true;
+        // Skip macOS .DS_Store files
+        if (name === ".DS_Store") return true;
+        // Skip macOS resource fork files (._filename)
+        if (name.indexOf("._") === 0) return true;
+        // Skip other hidden files starting with .
+        if (name.indexOf(".") === 0) return true;
+        return false;
+    }
+
+    /**
+     * Recursively lists all files on FTP server
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {string} remotePath - Base path on FTP server
+     * @param {string} currentPath - Current relative path
+     * @param {Array} results - Array to store results
+     */
+    function listFTPFilesRecursive(ftpConfig, remotePath, currentPath, results) {
+        var fullPath = remotePath + (currentPath ? "/" + currentPath : "");
+        var port = ftpConfig.port || "21";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
+
+        // Use curl with -l for names only
+        var command = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+
+        try {
+            var output = executeCommand(command);
+            var items = output.split("\n");
+
+            for (var i = 0; i < items.length; i++) {
+                var item = items[i].replace(/^\s+|\s+$/g, "");
+                if (item.length === 0) continue;
+
+                // Skip system and hidden files
+                if (shouldSkipFile(item)) continue;
+
+                var itemPath = currentPath ? currentPath + "/" + item : item;
+
+                // Try to list as directory - if it works, it's a directory
+                var testUrl = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
+                var testCommand = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
+
+                try {
+                    var testOutput = executeCommand(testCommand);
+                    if (testOutput && testOutput.length > 0 && testOutput.indexOf("curl:") === -1) {
+                        // It's a directory, recurse
+                        listFTPFilesRecursive(ftpConfig, remotePath, itemPath, results);
+                    } else {
+                        // It's a file
+                        results.push({
+                            relativePath: itemPath,
+                            name: item
+                        });
+                    }
+                } catch (e) {
+                    // Assume it's a file
+                    results.push({
+                        relativePath: itemPath,
+                        name: item
+                    });
+                }
+            }
+        } catch (e) {
+            // Directory doesn't exist or error
+        }
+    }
+
+    /**
+     * Downloads a file from FTP
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {string} remotePath - Path on FTP server
+     * @param {string} localPath - Local destination path
+     * @returns {boolean} Success status
+     */
+    function downloadFTPFile(ftpConfig, remotePath, localPath) {
+        var port = ftpConfig.port || "21";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath;
+
+        // Ensure local directory exists
+        var localFile = new File(localPath);
+        var localDir = localFile.parent;
+        if (!localDir.exists) {
+            localDir.create();
+        }
+
+        var command = "curl -s --user " + ftpConfig.username + ":" + ftpConfig.password +
+                      " -o \"" + localPath + "\" \"" + url + "\"";
+
+        try {
+            executeCommand(command);
+            return new File(localPath).exists;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Uploads a file to FTP
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {string} localPath - Local file path
+     * @param {string} remotePath - Destination path on FTP server
+     * @returns {boolean} Success status
+     */
+    function uploadFTPFile(ftpConfig, localPath, remotePath) {
+        var port = ftpConfig.port || "21";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath;
+
+        // Create remote directory structure using --ftp-create-dirs
+        var command = "curl -s --user " + ftpConfig.username + ":" + ftpConfig.password +
+                      " --ftp-create-dirs -T \"" + localPath + "\" \"" + url + "\"";
+
+        try {
+            executeCommand(command);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Compares local and remote file lists to determine sync actions
+     * @param {Array} localFiles - Array of local file info
+     * @param {Array} remoteFiles - Array of remote file info
+     * @returns {Object} {toUpload: [], toDownload: []}
+     */
+    function compareSyncFiles(localFiles, remoteFiles) {
+        var toUpload = [];
+        var toDownload = [];
+
+        // Create lookup maps
+        var localMap = {};
+        var remoteMap = {};
+
+        for (var i = 0; i < localFiles.length; i++) {
+            localMap[localFiles[i].relativePath] = localFiles[i];
+        }
+
+        for (var i = 0; i < remoteFiles.length; i++) {
+            remoteMap[remoteFiles[i].relativePath] = remoteFiles[i];
+        }
+
+        // Find files to upload (local files not on remote)
+        for (var path in localMap) {
+            if (!remoteMap.hasOwnProperty(path)) {
+                toUpload.push(localMap[path]);
+            }
+        }
+
+        // Find files to download (remote files not on local)
+        for (var path in remoteMap) {
+            if (!localMap.hasOwnProperty(path)) {
+                toDownload.push(remoteMap[path]);
+            }
+        }
+
+        return {
+            toUpload: toUpload,
+            toDownload: toDownload
+        };
+    }
+
+    // ============================================================
     // HELPER FUNCTIONS - Name Processing
     // ============================================================
 
@@ -646,16 +1015,17 @@
     removeProjectBtn.preferredSize = [30, 25];
     removeProjectBtn.helpTip = "Remove current project";
 
-    // ---- Sub-project Section (initially hidden) ----
+    // ---- Sub-project Section (always visible, disabled when not applicable) ----
     var subProjectGroup = mainGroup.add("group");
     subProjectGroup.orientation = "column";
     subProjectGroup.alignment = ["fill", "top"];
     subProjectGroup.alignChildren = ["fill", "top"];
-    subProjectGroup.visible = false;
 
     var subProjectLabel = subProjectGroup.add("statictext", undefined, "Sub-project:");
-    var subProjectDropdown = subProjectGroup.add("dropdownlist", undefined, []);
+    var subProjectDropdown = subProjectGroup.add("dropdownlist", undefined, ["(No sub-projects)"]);
     subProjectDropdown.alignment = ["fill", "center"];
+    subProjectDropdown.selection = 0;
+    subProjectDropdown.enabled = false; // Start disabled
 
     // ---- Separator ----
     var sep3 = mainGroup.add("panel", undefined, undefined, {borderStyle: "sunken"});
@@ -677,6 +1047,10 @@
     fileActionGroup.orientation = "row";
     fileActionGroup.alignment = ["fill", "top"];
     fileActionGroup.alignChildren = ["fill", "center"];
+
+    var refreshBtn = fileActionGroup.add("button", undefined, "Refresh");
+    refreshBtn.alignment = ["fill", "center"];
+    refreshBtn.helpTip = "Refresh file list and sub-project detection";
 
     var openFileBtn = fileActionGroup.add("button", undefined, "Open File");
     openFileBtn.alignment = ["fill", "center"];
@@ -711,10 +1085,56 @@
     newKWBtn.alignment = ["fill", "center"];
     newKWBtn.helpTip = "Create new KW folder and save project there";
 
-    // ---- Refresh Button ----
-    var refreshBtn = mainGroup.add("button", undefined, "Refresh");
-    refreshBtn.alignment = ["fill", "top"];
-    refreshBtn.helpTip = "Refresh file list and sub-project detection";
+    // ---- Separator ----
+    var sep5 = mainGroup.add("panel", undefined, undefined, {borderStyle: "sunken"});
+    sep5.alignment = ["fill", "top"];
+
+    // ---- FTP Sync Section ----
+    var ftpSyncLabel = mainGroup.add("statictext", undefined, "FTP Sync:");
+    ftpSyncLabel.alignment = ["left", "top"];
+
+    var ftpDropdownGroup = mainGroup.add("group");
+    ftpDropdownGroup.orientation = "row";
+    ftpDropdownGroup.alignment = ["fill", "top"];
+    ftpDropdownGroup.alignChildren = ["fill", "center"];
+
+    var ftpLocationDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["Input", "Output"]);
+    ftpLocationDropdown.selection = 0;
+    ftpLocationDropdown.alignment = ["fill", "center"];
+    ftpLocationDropdown.helpTip = "Input: 01_inbox folder\nOutput: 06_vfx/03_out folder";
+
+    var ftpCountDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["Latest", "Latest 5"]);
+    ftpCountDropdown.selection = 0;
+    ftpCountDropdown.alignment = ["fill", "center"];
+    ftpCountDropdown.helpTip = "How many date folders to sync";
+
+    var syncBtn = mainGroup.add("button", undefined, "Sync");
+    syncBtn.alignment = ["fill", "top"];
+    syncBtn.helpTip = "Start FTP synchronization";
+
+    // ---- Progress Section ----
+    var progressGroup = mainGroup.add("group");
+    progressGroup.orientation = "column";
+    progressGroup.alignment = ["fill", "top"];
+    progressGroup.alignChildren = ["fill", "top"];
+    progressGroup.spacing = 5;
+
+    var progressFileLabel = progressGroup.add("statictext", undefined, "File: -");
+    progressFileLabel.alignment = ["fill", "top"];
+
+    var progressFileBar = progressGroup.add("progressbar", undefined, 0, 100);
+    progressFileBar.alignment = ["fill", "top"];
+    progressFileBar.preferredSize.height = 10;
+
+    var progressOverallLabel = progressGroup.add("statictext", undefined, "Overall: -");
+    progressOverallLabel.alignment = ["fill", "top"];
+
+    var progressOverallBar = progressGroup.add("progressbar", undefined, 0, 100);
+    progressOverallBar.alignment = ["fill", "top"];
+    progressOverallBar.preferredSize.height = 10;
+
+    var progressStatusText = progressGroup.add("statictext", undefined, "Ready");
+    progressStatusText.alignment = ["fill", "top"];
 
     // ============================================================
     // STATE MANAGEMENT
@@ -755,6 +1175,23 @@
     }
 
     /**
+     * Enables the sub-project dropdown (when sub-projects exist)
+     */
+    function enableSubProjectSection() {
+        subProjectDropdown.enabled = true;
+    }
+
+    /**
+     * Disables the sub-project dropdown and shows placeholder text
+     */
+    function disableSubProjectSection() {
+        subProjectDropdown.removeAll();
+        subProjectDropdown.add("item", "(No sub-projects)");
+        subProjectDropdown.selection = 0;
+        subProjectDropdown.enabled = false;
+    }
+
+    /**
      * Updates the sub-project dropdown
      * @param {string} projectPath - Path to the project
      */
@@ -763,7 +1200,7 @@
         currentSubProjects = [];
 
         if (!projectPath) {
-            subProjectGroup.visible = false;
+            disableSubProjectSection();
             return;
         }
 
@@ -771,7 +1208,7 @@
         currentSubProjects = detectSubProjects(aeFolder);
 
         if (currentSubProjects.length === 0) {
-            subProjectGroup.visible = false;
+            disableSubProjectSection();
             return;
         }
 
@@ -798,7 +1235,7 @@
             subProjectDropdown.selection = 0; // "(All)"
         }
 
-        subProjectGroup.visible = true;
+        enableSubProjectSection();
     }
 
     /**
@@ -818,7 +1255,7 @@
         var projectPath = currentProjects[projectIndex].path;
 
         var subProject = null;
-        if (subProjectGroup.visible && subProjectDropdown.selection) {
+        if (subProjectDropdown.enabled && subProjectDropdown.selection) {
             var subProjectIndex = subProjectDropdown.selection.index;
             if (subProjectIndex > 0) { // Not "(All)"
                 subProject = currentSubProjects[subProjectIndex - 1];
@@ -845,7 +1282,7 @@
      */
     function updateUIState() {
         if (!projectDropdown.selection) {
-            subProjectGroup.visible = false;
+            disableSubProjectSection();
             recentFileNameText.text = "No project selected";
             recentFileDateText.text = "";
             currentMostRecentFile = null;
@@ -862,7 +1299,7 @@
         if (!projectFolder.exists) {
             recentFileNameText.text = "Project folder not found!";
             recentFileDateText.text = projectPath;
-            subProjectGroup.visible = false;
+            disableSubProjectSection();
             openFileBtn.enabled = false;
             openFolderBtn.enabled = false;
             return;
@@ -1212,6 +1649,255 @@
 
         } catch (error) {
             alert("Error in New KW:\n" + error.message + "\nLine: " + error.line);
+        }
+    };
+
+    // Sync button
+    syncBtn.onClick = function() {
+        try {
+            // Validate project selection
+            if (!projectDropdown.selection) {
+                alert("Please select a project first.");
+                return;
+            }
+
+            var projectIndex = projectDropdown.selection.index;
+            var projectName = currentProjects[projectIndex].name;
+            var projectPath = currentProjects[projectIndex].path;
+
+            // Get FTP connection for this project
+            var ftpConfig = getFTPConnectionForProject(projectName);
+            if (!ftpConfig) {
+                alert("No FTP connection configured for project:\n" + projectName +
+                      "\n\nPlease add a connection in:\n" + FTP_CONFIG_FILE);
+                return;
+            }
+
+            // Determine sync location
+            var isInput = ftpLocationDropdown.selection.index === 0;
+            var syncPath = isInput ? FTP_INPUT_PATH : FTP_OUTPUT_PATH;
+            var localBasePath = projectPath + "/" + syncPath;
+
+            // Check if local folder exists
+            var localFolder = new Folder(localBasePath);
+            if (!localFolder.exists) {
+                alert("Local folder does not exist:\n" + localBasePath);
+                return;
+            }
+
+            // Determine how many folders to sync
+            var folderCount = ftpCountDropdown.selection.index === 0 ? 1 : 5;
+
+            // Get date folders to sync
+            var dateFolders = getLatestDateFolders(localBasePath, folderCount);
+
+            // Also check remote for date folders we might not have locally
+            progressStatusText.text = "Scanning remote folders...";
+            panel.layout.layout(true);
+
+            var remoteItems = listFTPFiles(ftpConfig, syncPath);
+            var remoteDateFolders = [];
+            for (var i = 0; i < remoteItems.length; i++) {
+                if (isDateFolder(remoteItems[i])) {
+                    remoteDateFolders.push(remoteItems[i]);
+                }
+            }
+            remoteDateFolders.sort(function(a, b) { return b.localeCompare(a); });
+
+            // Combine local and remote date folders
+            var allDateFolders = dateFolders.slice();
+            for (var i = 0; i < remoteDateFolders.length; i++) {
+                var found = false;
+                for (var j = 0; j < allDateFolders.length; j++) {
+                    if (allDateFolders[j] === remoteDateFolders[i]) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    allDateFolders.push(remoteDateFolders[i]);
+                }
+            }
+            allDateFolders.sort(function(a, b) { return b.localeCompare(a); });
+            allDateFolders = allDateFolders.slice(0, folderCount);
+
+            if (allDateFolders.length === 0) {
+                alert("No date folders found to sync.");
+                progressStatusText.text = "Ready";
+                return;
+            }
+
+            // Collect all files to sync
+            progressStatusText.text = "Scanning files...";
+            panel.layout.layout(true);
+
+            var allLocalFiles = [];
+            var allRemoteFiles = [];
+
+            for (var f = 0; f < allDateFolders.length; f++) {
+                var dateFolder = allDateFolders[f];
+                var localDatePath = localBasePath + "/" + dateFolder;
+                var remoteDatePath = syncPath + "/" + dateFolder;
+
+                // Scan local files
+                var localFolder = new Folder(localDatePath);
+                if (localFolder.exists) {
+                    var localFiles = [];
+                    scanFolderForFiles(localFolder, localDatePath, localFiles);
+                    for (var i = 0; i < localFiles.length; i++) {
+                        localFiles[i].dateFolder = dateFolder;
+                        localFiles[i].fullLocalPath = localDatePath + "/" + localFiles[i].relativePath;
+                        localFiles[i].fullRemotePath = remoteDatePath + "/" + localFiles[i].relativePath;
+                        allLocalFiles.push(localFiles[i]);
+                    }
+                }
+
+                // Scan remote files
+                var remoteFiles = [];
+                listFTPFilesRecursive(ftpConfig, remoteDatePath, "", remoteFiles);
+                for (var i = 0; i < remoteFiles.length; i++) {
+                    remoteFiles[i].dateFolder = dateFolder;
+                    remoteFiles[i].fullLocalPath = localDatePath + "/" + remoteFiles[i].relativePath;
+                    remoteFiles[i].fullRemotePath = remoteDatePath + "/" + remoteFiles[i].relativePath;
+                    allRemoteFiles.push(remoteFiles[i]);
+                }
+            }
+
+            // Debug: Show what was found
+            var debugMsg = "DEBUG INFO:\n\n";
+            debugMsg += "Local files found: " + allLocalFiles.length + "\n";
+            debugMsg += "Remote files found: " + allRemoteFiles.length + "\n\n";
+
+            if (allLocalFiles.length > 0) {
+                debugMsg += "Sample local paths:\n";
+                for (var d = 0; d < Math.min(3, allLocalFiles.length); d++) {
+                    debugMsg += "  " + allLocalFiles[d].relativePath + "\n";
+                }
+            }
+
+            if (allRemoteFiles.length > 0) {
+                debugMsg += "\nSample remote paths:\n";
+                for (var d = 0; d < Math.min(3, allRemoteFiles.length); d++) {
+                    debugMsg += "  " + allRemoteFiles[d].relativePath + "\n";
+                }
+            }
+
+            // Show debug info - remove this alert once debugging is complete
+            alert(debugMsg);
+
+            // Compare files
+            var syncActions = compareSyncFiles(allLocalFiles, allRemoteFiles);
+
+            if (syncActions.toUpload.length === 0 && syncActions.toDownload.length === 0) {
+                alert("Everything is already in sync!\n\nFolders checked: " + allDateFolders.join(", "));
+                progressStatusText.text = "Ready - All synced";
+                return;
+            }
+
+            // Build confirmation message
+            var confirmMsg = "FTP Sync Summary\n";
+            confirmMsg += "================\n\n";
+            confirmMsg += "Folders: " + allDateFolders.join(", ") + "\n\n";
+
+            if (syncActions.toUpload.length > 0) {
+                confirmMsg += "FILES TO UPLOAD (" + syncActions.toUpload.length + "):\n";
+                for (var i = 0; i < Math.min(syncActions.toUpload.length, 10); i++) {
+                    confirmMsg += "  + " + syncActions.toUpload[i].relativePath + "\n";
+                }
+                if (syncActions.toUpload.length > 10) {
+                    confirmMsg += "  ... and " + (syncActions.toUpload.length - 10) + " more\n";
+                }
+                confirmMsg += "\n";
+            }
+
+            if (syncActions.toDownload.length > 0) {
+                confirmMsg += "FILES TO DOWNLOAD (" + syncActions.toDownload.length + "):\n";
+                for (var i = 0; i < Math.min(syncActions.toDownload.length, 10); i++) {
+                    confirmMsg += "  - " + syncActions.toDownload[i].relativePath + "\n";
+                }
+                if (syncActions.toDownload.length > 10) {
+                    confirmMsg += "  ... and " + (syncActions.toDownload.length - 10) + " more\n";
+                }
+            }
+
+            confirmMsg += "\nProceed with sync?";
+
+            if (!confirm(confirmMsg)) {
+                progressStatusText.text = "Sync cancelled";
+                return;
+            }
+
+            // Calculate total size for progress
+            var totalSize = 0;
+            var processedSize = 0;
+
+            for (var i = 0; i < syncActions.toUpload.length; i++) {
+                totalSize += syncActions.toUpload[i].size || 1000; // Default size if unknown
+            }
+            for (var i = 0; i < syncActions.toDownload.length; i++) {
+                totalSize += 1000; // Estimate for downloads
+            }
+
+            var totalFiles = syncActions.toUpload.length + syncActions.toDownload.length;
+            var processedFiles = 0;
+
+            // Perform uploads
+            for (var i = 0; i < syncActions.toUpload.length; i++) {
+                var fileInfo = syncActions.toUpload[i];
+                progressFileLabel.text = "Uploading: " + fileInfo.relativePath;
+                progressFileBar.value = 0;
+                progressOverallLabel.text = "Overall: " + (processedFiles + 1) + " / " + totalFiles;
+                panel.layout.layout(true);
+
+                var success = uploadFTPFile(ftpConfig, fileInfo.fullLocalPath, fileInfo.fullRemotePath);
+
+                processedFiles++;
+                processedSize += fileInfo.size || 1000;
+                progressFileBar.value = 100;
+                progressOverallBar.value = (processedSize / totalSize) * 100;
+                panel.layout.layout(true);
+
+                if (!success) {
+                    progressStatusText.text = "Error uploading: " + fileInfo.relativePath;
+                }
+            }
+
+            // Perform downloads
+            for (var i = 0; i < syncActions.toDownload.length; i++) {
+                var fileInfo = syncActions.toDownload[i];
+                progressFileLabel.text = "Downloading: " + fileInfo.relativePath;
+                progressFileBar.value = 0;
+                progressOverallLabel.text = "Overall: " + (processedFiles + 1) + " / " + totalFiles;
+                panel.layout.layout(true);
+
+                var success = downloadFTPFile(ftpConfig, fileInfo.fullRemotePath, fileInfo.fullLocalPath);
+
+                processedFiles++;
+                processedSize += 1000;
+                progressFileBar.value = 100;
+                progressOverallBar.value = (processedSize / totalSize) * 100;
+                panel.layout.layout(true);
+
+                if (!success) {
+                    progressStatusText.text = "Error downloading: " + fileInfo.relativePath;
+                }
+            }
+
+            // Done
+            progressFileLabel.text = "File: Complete";
+            progressOverallLabel.text = "Overall: " + totalFiles + " / " + totalFiles;
+            progressFileBar.value = 100;
+            progressOverallBar.value = 100;
+            progressStatusText.text = "Sync complete! " + syncActions.toUpload.length + " uploaded, " + syncActions.toDownload.length + " downloaded";
+            panel.layout.layout(true);
+
+            alert("Sync complete!\n\n" +
+                  "Uploaded: " + syncActions.toUpload.length + " files\n" +
+                  "Downloaded: " + syncActions.toDownload.length + " files");
+
+        } catch (error) {
+            alert("Error during sync:\n" + error.message + "\nLine: " + error.line);
+            progressStatusText.text = "Error: " + error.message;
         }
     };
 
