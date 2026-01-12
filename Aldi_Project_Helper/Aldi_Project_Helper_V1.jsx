@@ -1946,6 +1946,9 @@
             if (confirm(confirmMsg)) {
                 // Start rendering
                 renderQueue.render();
+
+                // Switch FTP dropdown to Output for easy syncing after render
+                ftpLocationDropdown.selection = 1;
             } else if (!clipboardSuccess) {
                 // Show path dialog if clipboard failed and user cancelled render
                 showPathDialog("Output Path", "Copy the output path:", simplifiedPath);
