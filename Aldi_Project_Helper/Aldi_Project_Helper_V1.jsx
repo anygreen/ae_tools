@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.3.2";
+    var SCRIPT_VERSION = "v1.3.3";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -853,15 +853,15 @@
     function encodeURIComponentSimple(str) {
         var result = "";
         for (var i = 0; i < str.length; i++) {
-            var char = str.charAt(i);
+            var ch = str.charAt(i);
             var code = str.charCodeAt(i);
 
             // Safe characters: A-Z, a-z, 0-9, - _ . ~
             if ((code >= 65 && code <= 90) ||   // A-Z
                 (code >= 97 && code <= 122) ||  // a-z
                 (code >= 48 && code <= 57) ||   // 0-9
-                char === "-" || char === "_" || char === "." || char === "~") {
-                result += char;
+                ch === "-" || ch === "_" || ch === "." || ch === "~") {
+                result += ch;
             } else {
                 // Encode as %XX
                 var hex = code.toString(16).toUpperCase();
@@ -1512,7 +1512,18 @@
 
         if (currentMostRecentFile) {
             recentFileNameText.text = currentMostRecentFile.file.name;
-            recentFileDateText.text = "Modified: " + formatDateReadable(currentMostRecentFile.modDate);
+            // Display modification date if available
+            if (currentMostRecentFile.modDate && currentMostRecentFile.modDate instanceof Date) {
+                recentFileDateText.text = "Modified: " + formatDateReadable(currentMostRecentFile.modDate);
+            } else {
+                // Try to get date directly from file as fallback
+                try {
+                    var fileDate = new Date(currentMostRecentFile.file.modified);
+                    recentFileDateText.text = "Modified: " + formatDateReadable(fileDate);
+                } catch (e) {
+                    recentFileDateText.text = "";
+                }
+            }
             openFileBtn.enabled = true;
             openFolderBtn.enabled = true;
         } else {
