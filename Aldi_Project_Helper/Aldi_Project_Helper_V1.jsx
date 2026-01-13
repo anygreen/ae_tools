@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.3.6";
+    var SCRIPT_VERSION = "v1.3.8";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -93,10 +93,9 @@
                 // -f "%Sm" = modification time, -t = format string
                 result = system.callSystem('stat -f "%Sm" -t "%d.%m.%Y %H:%M" "' + filePath + '"');
             } else {
-                // Windows: use PowerShell to get modification date
-                // Escape double quotes in path and use double quotes for PowerShell string
-                var escapedPath = filePath.replace(/\\/g, "\\\\").replace(/"/g, '`"');
-                result = system.callSystem('powershell -command "(Get-Item \"' + escapedPath + '\").LastWriteTime.ToString(\"dd.MM.yyyy HH:mm\")"');
+                // Windows: use PowerShell with cmd /c wrapper and LiteralPath for special characters
+                var command = 'powershell -command "(Get-Item -LiteralPath \'' + filePath.replace(/'/g, "''") + '\').LastWriteTime.ToString(\'dd.MM.yyyy HH:mm\')"';
+                result = system.callSystem('cmd /c ' + command);
             }
             // Trim whitespace/newlines from result
             return result.replace(/^\s+|\s+$/g, "");
@@ -237,11 +236,22 @@
             } else if (item instanceof File) {
                 // Check if it's an .aep file
                 if (item.name.toLowerCase().match(/\.aep$/)) {
-                    results.push({
-                        file: item,
-                        relativePath: relativePath || "",
-                        modDate: new Date(item.modified)
-                    });
+                    // Double-check: skip files in excluded folders (by checking full path)
+                    var fullPath = item.fsName;
+                    var isInExcludedFolder = false;
+                    for (var k = 0; k < EXCLUDED_FOLDERS.length; k++) {
+                        if (fullPath.indexOf(EXCLUDED_FOLDERS[k]) !== -1) {
+                            isInExcludedFolder = true;
+                            break;
+                        }
+                    }
+                    if (!isInExcludedFolder) {
+                        results.push({
+                            file: item,
+                            relativePath: relativePath || "",
+                            modDate: new Date(item.modified)
+                        });
+                    }
                 }
             }
         }
@@ -474,8 +484,8 @@
                 // On Mac, use pbcopy
                 system.callSystem('echo "' + text.replace(/"/g, '\\"') + '" | pbcopy');
             } else {
-                // On Windows, use clip
-                system.callSystem('echo ' + text + '| clip');
+                // On Windows, use clip with cmd /c wrapper
+                system.callSystem('cmd /c echo ' + text + '| clip');
             }
             return true;
         } catch (e) {
@@ -703,8 +713,9 @@
                 // On Mac, system.callSystem works like Terminal - call directly
                 result = system.callSystem(command);
             } else {
-                // On Windows, need to use cmd /c to execute commands
-                result = system.callSystem('cmd /c "' + command.replace(/"/g, '""') + '"');
+                // On Windows, use cmd /c without extra quoting
+                // The command itself should have proper quoting for arguments
+                result = system.callSystem('cmd /c ' + command);
             }
         } catch (e) {
             result = "";
