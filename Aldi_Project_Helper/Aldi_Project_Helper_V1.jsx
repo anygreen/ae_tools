@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.4.2";
+    var SCRIPT_VERSION = "v1.4.3";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -701,9 +701,10 @@
             if (item instanceof Folder) {
                 scanFolderForFiles(item, basePath, results);
             } else if (item instanceof File) {
-                var relativePath = item.fsName.replace(basePath, "").replace(/^[\/\\]/, "");
-                // Normalize path separators to forward slashes for comparison
-                relativePath = relativePath.replace(/\\/g, "/");
+                // Normalize both paths to forward slashes before comparison (Windows uses backslashes)
+                var normalizedFsName = item.fsName.replace(/\\/g, "/");
+                var normalizedBasePath = basePath.replace(/\\/g, "/");
+                var relativePath = normalizedFsName.replace(normalizedBasePath, "").replace(/^\//, "");
                 results.push({
                     file: item,
                     relativePath: relativePath,
@@ -2142,9 +2143,6 @@
             var testCommand = "curl -s -l --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
 
             var testResult = executeCommand(testCommand);
-
-            // DEBUG: Show what was returned
-            alert("DEBUG FTP Test:\n\nCommand: " + testCommand + "\n\nResult length: " + (testResult ? testResult.length : "null") + "\n\nResult: '" + (testResult ? testResult.substring(0, 500) : "null") + "'");
 
             if (!testResult || testResult.length === 0) {
                 if (!confirm("FTP connection test returned no data.\nThis might indicate a connection issue.\n\nContinue anyway?")) {
