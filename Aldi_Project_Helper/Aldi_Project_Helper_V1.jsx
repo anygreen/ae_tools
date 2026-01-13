@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.4.0";
+    var SCRIPT_VERSION = "v1.4.2";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -755,11 +755,10 @@
                 vbs.writeln('objShell.Run """' + batFile + '""", 0, True');
                 vbs.close();
 
-                // Execute the VBScript
-                vbs.execute();
-
-                // Wait a moment for file operations to complete
-                $.sleep(200);
+                // Execute the VBScript using system.callSystem to properly wait for completion
+                // wscript //B runs in batch mode (no script errors/popups)
+                // wscript itself doesn't show a window, only the batch file would (but that's hidden via 0 parameter)
+                system.callSystem('wscript //B "' + vbsFile + '"');
 
                 // Read output file
                 var outFile = new File(outputFile);
@@ -1745,15 +1744,6 @@
     // Refresh button
     refreshBtn.onClick = function() {
         updateUIState();
-
-        // DEBUG: Show what date is being read
-        if (currentMostRecentFile) {
-            var debugPath = currentMostRecentFile.file.fsName;
-            var debugDate = getFileModificationDate(debugPath);
-            alert("DEBUG:\nFile: " + debugPath + "\n\nDate result: '" + debugDate + "'\n\nLength: " + debugDate.length);
-        } else {
-            alert("DEBUG: No recent file found");
-        }
     };
 
     // AEP version up button
@@ -2152,6 +2142,9 @@
             var testCommand = "curl -s -l --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
 
             var testResult = executeCommand(testCommand);
+
+            // DEBUG: Show what was returned
+            alert("DEBUG FTP Test:\n\nCommand: " + testCommand + "\n\nResult length: " + (testResult ? testResult.length : "null") + "\n\nResult: '" + (testResult ? testResult.substring(0, 500) : "null") + "'");
 
             if (!testResult || testResult.length === 0) {
                 if (!confirm("FTP connection test returned no data.\nThis might indicate a connection issue.\n\nContinue anyway?")) {
