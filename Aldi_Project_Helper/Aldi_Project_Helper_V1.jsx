@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.3.9";
+    var SCRIPT_VERSION = "v1.4.0";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -92,13 +92,17 @@
                 // Use stat on Mac to get formatted modification date
                 // -f "%Sm" = modification time, -t = format string
                 result = system.callSystem('stat -f "%Sm" -t "%d.%m.%Y %H:%M" "' + filePath + '"');
+                // Trim whitespace/newlines from result
+                return result.replace(/^\s+|\s+$/g, "");
             } else {
-                // Windows: use PowerShell with cmd /c wrapper and LiteralPath for special characters
-                var command = 'powershell -command "(Get-Item -LiteralPath \'' + filePath.replace(/'/g, "''") + '\').LastWriteTime.ToString(\'dd.MM.yyyy HH:mm\')"';
-                result = system.callSystem('cmd /c ' + command);
+                // Windows: use ExtendScript's native File.modified property
+                var file = new File(filePath);
+                if (file.exists) {
+                    var modDate = new Date(file.modified);
+                    return formatDateReadable(modDate);
+                }
+                return "";
             }
-            // Trim whitespace/newlines from result
-            return result.replace(/^\s+|\s+$/g, "");
         } catch (e) {
             return "";
         }
@@ -726,10 +730,44 @@
                 // On Mac, system.callSystem works like Terminal - call directly
                 result = system.callSystem(command);
             } else {
-                // On Windows, wrap command in quotes and escape internal quotes
-                // cmd /c "command" requires the command to be in quotes
-                var escapedCmd = command.replace(/"/g, '\\"');
-                result = system.callSystem('cmd /c "' + escapedCmd + '"');
+                // On Windows, use VBScript to run command silently (hidden window)
+                var tempFolder = Folder.temp.fsName;
+                var outputFile = tempFolder + "\\ae_cmd_output.txt";
+                var batFile = tempFolder + "\\ae_cmd_runner.bat";
+                var vbsFile = tempFolder + "\\ae_cmd_launcher.vbs";
+
+                // Delete old output file if exists
+                var oldOutput = new File(outputFile);
+                if (oldOutput.exists) oldOutput.remove();
+
+                // Create batch file with the command
+                var bat = new File(batFile);
+                bat.open('w');
+                bat.writeln('@echo off');
+                bat.writeln(command + ' > "' + outputFile + '" 2>&1');
+                bat.close();
+
+                // Create VBScript that runs batch file with hidden window
+                // The "0" parameter hides the window, "True" waits for completion
+                var vbs = new File(vbsFile);
+                vbs.open('w');
+                vbs.writeln('Set objShell = CreateObject("WScript.Shell")');
+                vbs.writeln('objShell.Run """' + batFile + '""", 0, True');
+                vbs.close();
+
+                // Execute the VBScript
+                vbs.execute();
+
+                // Wait a moment for file operations to complete
+                $.sleep(200);
+
+                // Read output file
+                var outFile = new File(outputFile);
+                if (outFile.exists) {
+                    outFile.open('r');
+                    result = outFile.read();
+                    outFile.close();
+                }
             }
         } catch (e) {
             result = "";
