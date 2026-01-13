@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.3.8";
+    var SCRIPT_VERSION = "v1.3.9";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -484,8 +484,21 @@
                 // On Mac, use pbcopy
                 system.callSystem('echo "' + text.replace(/"/g, '\\"') + '" | pbcopy');
             } else {
-                // On Windows, use clip with cmd /c wrapper
-                system.callSystem('cmd /c echo ' + text + '| clip');
+                // On Windows, use temp file + batch file approach (more reliable)
+                var tempFolder = Folder.temp.fsName;
+
+                // Write text to temp file
+                var clipTxtFile = new File(tempFolder + "/ClipBoard.txt");
+                clipTxtFile.open('w');
+                clipTxtFile.write(text);
+                clipTxtFile.close();
+
+                // Create and execute batch file to copy to clipboard
+                var clipBatFile = new File(tempFolder + "/ClipBoard.bat");
+                clipBatFile.open('w');
+                clipBatFile.writeln('clip < "' + tempFolder + '/ClipBoard.txt"');
+                clipBatFile.close();
+                clipBatFile.execute();
             }
             return true;
         } catch (e) {
@@ -713,9 +726,10 @@
                 // On Mac, system.callSystem works like Terminal - call directly
                 result = system.callSystem(command);
             } else {
-                // On Windows, use cmd /c without extra quoting
-                // The command itself should have proper quoting for arguments
-                result = system.callSystem('cmd /c ' + command);
+                // On Windows, wrap command in quotes and escape internal quotes
+                // cmd /c "command" requires the command to be in quotes
+                var escapedCmd = command.replace(/"/g, '\\"');
+                result = system.callSystem('cmd /c "' + escapedCmd + '"');
             }
         } catch (e) {
             result = "";
@@ -1693,6 +1707,15 @@
     // Refresh button
     refreshBtn.onClick = function() {
         updateUIState();
+
+        // DEBUG: Show what date is being read
+        if (currentMostRecentFile) {
+            var debugPath = currentMostRecentFile.file.fsName;
+            var debugDate = getFileModificationDate(debugPath);
+            alert("DEBUG:\nFile: " + debugPath + "\n\nDate result: '" + debugDate + "'\n\nLength: " + debugDate.length);
+        } else {
+            alert("DEBUG: No recent file found");
+        }
     };
 
     // AEP version up button
