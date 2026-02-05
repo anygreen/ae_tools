@@ -9,3 +9,11 @@ username=lennert_exchange_jahresauftakt
 password=hJ7dsT5dsoe676
 port=21
 [/CONNECTION]
+
+[CONNECTION]
+project_folder=Aldi_V37_Regelkomm
+hostname=fra-clients.acht.studio
+username=Regelkomm_Lennert_Exchange
+password=67dsd7TRs87djk
+port=21
+[/CONNECTION]

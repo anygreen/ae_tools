@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.4.3";
+    var SCRIPT_VERSION = "v1.4.4";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -1263,6 +1263,105 @@
     }
 
     // ============================================================
+    // DIALOG HELPER FUNCTIONS - Highlighted Text Display
+    // ============================================================
+
+    /**
+     * Creates highlighted text display for version comparison dialogs
+     * Changed parts (version, date, initials, KW) are shown in red and bold
+     * @param {Group} container - Parent group to add text to
+     * @param {boolean} isOld - True if displaying old name, false for new name
+     * @param {string} name - The name to display
+     * @param {Object} result - Processing result from processFileName
+     */
+    function createHighlightedText(container, isOld, name, result) {
+        var group = container.add("group");
+        group.orientation = "row";
+        group.alignChildren = ["left", "center"];
+        group.spacing = 0;
+        group.margins = 0;
+
+        // Split the name into parts for highlighting
+        var parts = name.split('_');
+        var oldParts = result.oldName.split('_');
+        var newParts = result.newName.split('_');
+
+        for (var i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                var separator = group.add("statictext", undefined, "_");
+                separator.margins = 0;
+            }
+
+            var part = parts[i];
+            var textGroup = group.add("group");
+            textGroup.orientation = "row";
+            textGroup.spacing = 0;
+            textGroup.margins = 0;
+
+            var text = textGroup.add("statictext", undefined, part);
+            text.margins = 0;
+
+            // Only highlight changed parts in the new version
+            if (!isOld) {
+                var shouldHighlight = false;
+
+                // Check if this part changed between old and new
+                if (i < oldParts.length && i < newParts.length) {
+                    if (oldParts[i] !== newParts[i]) {
+                        shouldHighlight = true;
+                    }
+                } else if (i >= oldParts.length) {
+                    // This is an added part (e.g., added initials or date)
+                    shouldHighlight = true;
+                }
+
+                if (shouldHighlight) {
+                    text.graphics.foregroundColor = text.graphics.newPen(text.graphics.PenType.SOLID_COLOR, [1, 0, 0], 1);
+                    text.graphics.font = ScriptUI.newFont(text.graphics.font.name, "Bold", text.graphics.font.size);
+                }
+            }
+        }
+    }
+
+    /**
+     * Creates a comparison group showing old and new names with highlighted changes
+     * @param {Window} container - Parent container (dialog window)
+     * @param {string} label - Label for this group (e.g., "Project File" or "Compositions")
+     * @param {Array} oldNames - Array of original names
+     * @param {Array} results - Array of processing results from processFileName
+     */
+    function createComparisonGroup(container, label, oldNames, results) {
+        var group = container.add("group");
+        group.orientation = "column";
+        group.alignChildren = ["left", "top"];
+        group.spacing = 4;
+        group.margins = 0;
+        group.maximumSize.width = 800;
+
+        var titleText = group.add("statictext", undefined, label + ":");
+        titleText.graphics.font = ScriptUI.newFont(titleText.graphics.font.name, "Bold", titleText.graphics.font.size);
+        titleText.margins = 0;
+
+        // Show old names
+        for (var i = 0; i < oldNames.length; i++) {
+            createHighlightedText(group, true, oldNames[i], results[i]);
+        }
+
+        if (oldNames.length > 0) {
+            // Add arrow/separator
+            var arrowGroup = group.add("group");
+            arrowGroup.margins = [0, 4, 0, 4];
+            var arrowText = arrowGroup.add("statictext", undefined, "\u2193"); // Down arrow
+            arrowText.graphics.foregroundColor = arrowText.graphics.newPen(arrowText.graphics.PenType.SOLID_COLOR, [0.5, 0.5, 0.5], 1);
+
+            // Show new names with highlights
+            for (var i = 0; i < results.length; i++) {
+                createHighlightedText(group, false, results[i].newName, results[i]);
+            }
+        }
+    }
+
+    // ============================================================
     // UI CREATION
     // ============================================================
 
@@ -1770,8 +1869,29 @@
 
             if (!result) return;
 
-            // Show confirmation dialog
-            if (confirm("Save project as:\n\n" + result.newName + ".aep\n\n(in same folder)")) {
+            // Create modal dialog with highlighted changes
+            var modal = new Window("dialog", "Version Up AEP");
+            modal.orientation = "column";
+            modal.alignChildren = ["left", "top"];
+            modal.spacing = 10;
+            modal.margins = 16;
+            modal.preferredSize.width = 400;
+
+            createComparisonGroup(modal, "Project File", [result.oldName], [result]);
+
+            var buttonGroup = modal.add("group");
+            buttonGroup.orientation = "row";
+            buttonGroup.alignment = ["center", "top"];
+            buttonGroup.spacing = 10;
+
+            var saveBtn = buttonGroup.add("button", undefined, "Save", {name: "ok"});
+            var cancelBtn = buttonGroup.add("button", undefined, "Cancel", {name: "cancel"});
+
+            modal.onResizing = modal.onResize = function() {
+                this.layout.resize();
+            };
+
+            if (modal.show() === 1) {
                 var newFile = new File(app.project.file.parent.fsName + "/" + result.newName + ".aep");
 
                 // Check if file already exists
@@ -1813,7 +1933,8 @@
             }
 
             // Process all selected comps
-            var newNames = [];
+            var oldNames = [];
+            var results = [];
             var hasError = false;
 
             for (var i = 0; i < selectedComps.length; i++) {
@@ -1828,20 +1949,47 @@
                     break;
                 }
 
-                newNames.push(result.newName);
+                oldNames.push(selectedComps[i].name);
+                results.push(result);
             }
 
             if (hasError) return;
 
-            // Build confirmation message
-            var confirmMsg = "Duplicate compositions:\n\n";
-            for (var i = 0; i < selectedComps.length; i++) {
-                confirmMsg += selectedComps[i].name + "\n  -> " + newNames[i] + "\n";
-            }
-            confirmMsg += "\nMove original compositions to _old folder?";
+            // Create modal dialog with highlighted changes
+            var modal = new Window("dialog", "Version Up Compositions");
+            modal.orientation = "column";
+            modal.alignChildren = ["left", "top"];
+            modal.spacing = 10;
+            modal.margins = 16;
+            modal.preferredSize.width = 400;
 
-            // Use a dialog to ask about moving to _old
-            var moveToOld = confirm(confirmMsg);
+            createComparisonGroup(modal, "Compositions", oldNames, results);
+
+            // Add move to _old checkbox
+            var moveGroup = modal.add("group");
+            moveGroup.orientation = "row";
+            moveGroup.alignment = ["left", "top"];
+            moveGroup.spacing = 10;
+            moveGroup.margins = [0, 10, 0, 0];
+
+            var moveToOldCheckbox = moveGroup.add("checkbox", undefined, "Move original to _old");
+            moveToOldCheckbox.value = true;
+
+            var buttonGroup = modal.add("group");
+            buttonGroup.orientation = "row";
+            buttonGroup.alignment = ["center", "top"];
+            buttonGroup.spacing = 10;
+
+            var duplicateBtn = buttonGroup.add("button", undefined, "Duplicate", {name: "ok"});
+            var cancelBtn = buttonGroup.add("button", undefined, "Cancel", {name: "cancel"});
+
+            modal.onResizing = modal.onResize = function() {
+                this.layout.resize();
+            };
+
+            if (modal.show() !== 1) return;
+
+            var moveToOld = moveToOldCheckbox.value;
 
             app.beginUndoGroup("Version Up Compositions");
 
@@ -1850,7 +1998,7 @@
             for (var i = 0; i < selectedComps.length; i++) {
                 var comp = selectedComps[i];
                 var newComp = comp.duplicate();
-                newComp.name = newNames[i];
+                newComp.name = results[i].newName;
                 newComps.push(newComp);
 
                 if (moveToOld) {
