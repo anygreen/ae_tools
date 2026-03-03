@@ -1207,7 +1207,7 @@
             }
         }
 
-        // Update version
+        // Update version (if found)
         if (versionPart) {
             if (options.resetVersion) {
                 newParts[versionPart.index] = padNumber(1, versionPart.number.length);
@@ -1217,10 +1217,6 @@
                 newParts[versionPart.index] = newVersion.fullVersion;
                 hasVersionChange = true;
             }
-        } else {
-            // No version found
-            alert("Could not find version number in filename:\n" + originalName);
-            return null;
         }
 
         // Update initials
@@ -1237,6 +1233,12 @@
                     hasInitialsChange = true;
                 }
             }
+        }
+
+        // Check that at least one thing changed
+        if (!hasDateChange && !hasVersionChange && !hasInitialsChange && !hasKWChange) {
+            alert("Nothing to update in filename:\n" + originalName);
+            return null;
         }
 
         return {
