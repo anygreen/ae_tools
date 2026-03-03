@@ -1092,12 +1092,12 @@
     /**
      * Finds version number in name parts (last part with 2+ digits only)
      * @param {Array} parts - Name split by underscore
+     * @param {number} excludeIndex - Index to skip (e.g., date index)
      * @returns {Object|null} {index, number, fullVersion} or null
      */
-    function parseVersion(parts) {
+    function parseVersion(parts, excludeIndex) {
         for (var i = parts.length - 1; i >= 0; i--) {
-            // Skip parts that are valid dates (YYMMDD starting with 2)
-            if (isDateValid(parts[i])) continue;
+            if (i === excludeIndex) continue;
             if (/^\d{2,}$/.test(parts[i])) {
                 return {
                     index: i,
@@ -1172,7 +1172,7 @@
 
         // Find components
         var dateInfo = findDateInParts(parts);
-        var versionPart = parseVersion(parts);
+        var versionPart = parseVersion(parts, dateInfo ? dateInfo.index : -1);
         var initialsInfo = parseInitials(parts);
         var kwInfo = parseKWInName(parts);
 
