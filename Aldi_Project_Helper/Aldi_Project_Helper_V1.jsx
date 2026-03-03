@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.4.4";
+    var SCRIPT_VERSION = "v1.5.0";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -672,17 +672,6 @@
     }
 
     /**
-     * Gets the N most recent date folders
-     * @param {string} folderPath - Path to scan
-     * @param {number} count - Number of folders to return
-     * @returns {Array} Array of folder names
-     */
-    function getLatestDateFolders(folderPath, count) {
-        var dateFolders = getDateFolders(folderPath);
-        return dateFolders.slice(0, count);
-    }
-
-    /**
      * Recursively scans a folder and returns all files with relative paths
      * @param {Folder} folder - Folder to scan
      * @param {string} basePath - Base path for relative path calculation
@@ -1107,6 +1096,8 @@
      */
     function parseVersion(parts) {
         for (var i = parts.length - 1; i >= 0; i--) {
+            // Skip parts that are valid dates (YYMMDD starting with 2)
+            if (isDateValid(parts[i])) continue;
             if (/^\d{2,}$/.test(parts[i])) {
                 return {
                     index: i,
@@ -2170,12 +2161,59 @@
             var projectIndex = projectDropdown.selection.index;
             var projectPath = currentProjects[projectIndex].path;
 
-            // Build output folder path: [project]/06_vfx/03_out/YYMMDD/HHmm
+            // Build output folder path
             var outBasePath = projectPath + "/06_vfx/03_out";
             var dateFolder = getRenderDateFolder();
             var timeFolder = getRenderTimeFolder();
 
-            var dateFolderPath = outBasePath + "/" + dateFolder;
+            // Determine active sub-project for output path
+            var renderSubProject = null;
+            if (currentSubProjects.length > 0) {
+                if (subProjectDropdown.enabled && subProjectDropdown.selection && subProjectDropdown.selection.index > 0) {
+                    // A specific sub-project is selected
+                    renderSubProject = currentSubProjects[subProjectDropdown.selection.index - 1];
+                } else {
+                    // "(All)" is selected - try to detect from open project file path
+                    if (app.project.file) {
+                        var openFilePath = app.project.file.fsName.replace(/\\/g, "/");
+                        for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                            if (openFilePath.indexOf("/" + currentSubProjects[sp] + "/") !== -1) {
+                                renderSubProject = currentSubProjects[sp];
+                                break;
+                            }
+                        }
+                    }
+                    // If still not detected, ask the user to pick one
+                    if (!renderSubProject) {
+                        var spDialog = new Window("dialog", "Select Sub-project for Output");
+                        spDialog.orientation = "column";
+                        spDialog.alignChildren = ["fill", "top"];
+                        spDialog.spacing = 10;
+                        spDialog.margins = 16;
+
+                        spDialog.add("statictext", undefined, "Sub-projects detected. Select output sub-project:");
+                        var spDropdown = spDialog.add("dropdownlist", undefined, currentSubProjects);
+                        spDropdown.selection = 0;
+
+                        var spBtnGroup = spDialog.add("group");
+                        spBtnGroup.orientation = "row";
+                        spBtnGroup.alignment = ["center", "top"];
+                        spBtnGroup.add("button", undefined, "OK", {name: "ok"});
+                        spBtnGroup.add("button", undefined, "Cancel", {name: "cancel"});
+
+                        if (spDialog.show() !== 1) return;
+                        renderSubProject = currentSubProjects[spDropdown.selection.index];
+                    }
+                }
+            }
+
+            // Build the full output path, inserting sub-project if applicable
+            var outRenderPath = outBasePath;
+            if (renderSubProject) {
+                outRenderPath += "/" + renderSubProject;
+            }
+
+            var dateFolderPath = outRenderPath + "/" + dateFolder;
             var timeFolderPath = dateFolderPath + "/" + timeFolder;
 
             // Check if base output folder exists
@@ -2183,6 +2221,17 @@
             if (!outBaseFolder.exists) {
                 alert("Output folder does not exist:\n" + outBasePath + "\n\nPlease create the folder structure first.");
                 return;
+            }
+
+            // Create sub-project folder if needed
+            if (renderSubProject) {
+                var subProjectFolderObj = new Folder(outRenderPath);
+                if (!subProjectFolderObj.exists) {
+                    if (!subProjectFolderObj.create()) {
+                        alert("Failed to create sub-project folder:\n" + outRenderPath);
+                        return;
+                    }
+                }
             }
 
             // Create date folder if needed
@@ -2224,7 +2273,7 @@
             }
 
             // Try to copy simplified path to clipboard (relative from project root)
-            var simplifiedPath = "/06_vfx/03_out/" + dateFolder + "/" + timeFolder;
+            var simplifiedPath = "/06_vfx/03_out/" + (renderSubProject ? renderSubProject + "/" : "") + dateFolder + "/" + timeFolder;
             var clipboardSuccess = copyToClipboard(simplifiedPath);
 
             // Show confirmation
@@ -2305,8 +2354,8 @@
             var localBasePath = projectPath + "/" + syncPath;
 
             // Check if local folder exists
-            var localFolder = new Folder(localBasePath);
-            if (!localFolder.exists) {
+            var localBaseFolder = new Folder(localBasePath);
+            if (!localBaseFolder.exists) {
                 alert("Local folder does not exist:\n" + localBasePath);
                 return;
             }
@@ -2314,78 +2363,121 @@
             // Determine how many folders to sync
             var folderCount = ftpCountDropdown.selection.index === 0 ? 1 : 5;
 
-            // Get date folders to sync
-            var dateFolders = getLatestDateFolders(localBasePath, folderCount);
+            // Build scan roots: each root is a location that contains date folders
+            var scanRoots = [];
 
-            // Also check remote for date folders we might not have locally
-            progressStatusText.text = "Scanning remote folders...";
-            panel.layout.layout(true);
+            if (isInput) {
+                // Input: always include the base inbox for regular date folders
+                scanRoots.push({localBase: localBasePath, remoteBase: syncPath, label: "inbox"});
 
-            var remoteItems = listFTPFiles(ftpConfig, syncPath);
-            var remoteDateFolders = [];
-            for (var i = 0; i < remoteItems.length; i++) {
-                if (isDateFolder(remoteItems[i])) {
-                    remoteDateFolders.push(remoteItems[i]);
+                // Add sub-project roots if sub-projects are detected
+                for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                    scanRoots.push({
+                        localBase: localBasePath + "/" + currentSubProjects[sp],
+                        remoteBase: syncPath + "/" + currentSubProjects[sp],
+                        label: currentSubProjects[sp]
+                    });
                 }
-            }
-            remoteDateFolders.sort(function(a, b) { return b.localeCompare(a); });
-
-            // Combine local and remote date folders
-            var allDateFolders = dateFolders.slice();
-            for (var i = 0; i < remoteDateFolders.length; i++) {
-                var found = false;
-                for (var j = 0; j < allDateFolders.length; j++) {
-                    if (allDateFolders[j] === remoteDateFolders[i]) {
-                        found = true;
-                        break;
+            } else {
+                // Output: if sub-projects exist, only scan inside sub-project folders
+                if (currentSubProjects.length > 0) {
+                    for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                        scanRoots.push({
+                            localBase: localBasePath + "/" + currentSubProjects[sp],
+                            remoteBase: syncPath + "/" + currentSubProjects[sp],
+                            label: currentSubProjects[sp]
+                        });
                     }
-                }
-                if (!found) {
-                    allDateFolders.push(remoteDateFolders[i]);
+                } else {
+                    // No sub-projects, single root at 03_out
+                    scanRoots.push({localBase: localBasePath, remoteBase: syncPath, label: "output"});
                 }
             }
-            allDateFolders.sort(function(a, b) { return b.localeCompare(a); });
-            allDateFolders = allDateFolders.slice(0, folderCount);
 
-            if (allDateFolders.length === 0) {
-                alert("No date folders found to sync.");
-                progressStatusText.text = "";
-                return;
-            }
-
-            // Collect all files to sync
-            progressStatusText.text = "Scanning files...";
+            // Collect all files to sync across all scan roots
+            progressStatusText.text = "Scanning folders...";
             panel.layout.layout(true);
 
             var allLocalFiles = [];
             var allRemoteFiles = [];
+            var allSyncedFolders = [];
 
-            for (var f = 0; f < allDateFolders.length; f++) {
-                var dateFolder = allDateFolders[f];
-                var localDatePath = localBasePath + "/" + dateFolder;
-                var remoteDatePath = syncPath + "/" + dateFolder;
+            for (var r = 0; r < scanRoots.length; r++) {
+                var root = scanRoots[r];
 
-                // Scan local files
-                var localFolder = new Folder(localDatePath);
-                if (localFolder.exists) {
-                    var localFiles = [];
-                    scanFolderForFiles(localFolder, localDatePath, localFiles);
-                    for (var i = 0; i < localFiles.length; i++) {
-                        localFiles[i].dateFolder = dateFolder;
-                        localFiles[i].fullLocalPath = localDatePath + "/" + localFiles[i].relativePath;
-                        localFiles[i].fullRemotePath = remoteDatePath + "/" + localFiles[i].relativePath;
-                        allLocalFiles.push(localFiles[i]);
+                progressStatusText.text = "Scanning " + root.label + "...";
+                panel.layout.layout(true);
+
+                // Get local date folders for this root
+                var rootLocalFolder = new Folder(root.localBase);
+                var localDateFolders = rootLocalFolder.exists ? getDateFolders(root.localBase) : [];
+
+                // Get remote date folders for this root
+                var remoteItems = listFTPFiles(ftpConfig, root.remoteBase);
+                var remoteDateFolders = [];
+                for (var i = 0; i < remoteItems.length; i++) {
+                    if (isDateFolder(remoteItems[i])) {
+                        remoteDateFolders.push(remoteItems[i]);
                     }
                 }
+                remoteDateFolders.sort(function(a, b) { return b.localeCompare(a); });
 
-                // Scan remote files
-                var remoteFiles = [];
-                listFTPFilesRecursive(ftpConfig, remoteDatePath, "", remoteFiles);
-                for (var i = 0; i < remoteFiles.length; i++) {
-                    remoteFiles[i].dateFolder = dateFolder;
-                    remoteFiles[i].fullLocalPath = localDatePath + "/" + remoteFiles[i].relativePath;
-                    remoteFiles[i].fullRemotePath = remoteDatePath + "/" + remoteFiles[i].relativePath;
-                    allRemoteFiles.push(remoteFiles[i]);
+                // Combine local and remote date folders
+                var combinedDateFolders = localDateFolders.slice();
+                for (var i = 0; i < remoteDateFolders.length; i++) {
+                    var found = false;
+                    for (var j = 0; j < combinedDateFolders.length; j++) {
+                        if (combinedDateFolders[j] === remoteDateFolders[i]) {
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        combinedDateFolders.push(remoteDateFolders[i]);
+                    }
+                }
+                combinedDateFolders.sort(function(a, b) { return b.localeCompare(a); });
+                combinedDateFolders = combinedDateFolders.slice(0, folderCount);
+
+                // Track which folders we're syncing (with label for display)
+                for (var i = 0; i < combinedDateFolders.length; i++) {
+                    var folderLabel = root.label !== "inbox" && root.label !== "output"
+                        ? root.label + "/" + combinedDateFolders[i]
+                        : combinedDateFolders[i];
+                    allSyncedFolders.push(folderLabel);
+                }
+
+                // Scan files in each date folder for this root
+                progressStatusText.text = "Scanning files in " + root.label + "...";
+                panel.layout.layout(true);
+
+                for (var f = 0; f < combinedDateFolders.length; f++) {
+                    var dateFolder = combinedDateFolders[f];
+                    var localDatePath = root.localBase + "/" + dateFolder;
+                    var remoteDatePath = root.remoteBase + "/" + dateFolder;
+
+                    // Scan local files
+                    var localFolder = new Folder(localDatePath);
+                    if (localFolder.exists) {
+                        var localFiles = [];
+                        scanFolderForFiles(localFolder, localDatePath, localFiles);
+                        for (var i = 0; i < localFiles.length; i++) {
+                            localFiles[i].dateFolder = dateFolder;
+                            localFiles[i].fullLocalPath = localDatePath + "/" + localFiles[i].relativePath;
+                            localFiles[i].fullRemotePath = remoteDatePath + "/" + localFiles[i].relativePath;
+                            allLocalFiles.push(localFiles[i]);
+                        }
+                    }
+
+                    // Scan remote files
+                    var remoteFiles = [];
+                    listFTPFilesRecursive(ftpConfig, remoteDatePath, "", remoteFiles);
+                    for (var i = 0; i < remoteFiles.length; i++) {
+                        remoteFiles[i].dateFolder = dateFolder;
+                        remoteFiles[i].fullLocalPath = localDatePath + "/" + remoteFiles[i].relativePath;
+                        remoteFiles[i].fullRemotePath = remoteDatePath + "/" + remoteFiles[i].relativePath;
+                        allRemoteFiles.push(remoteFiles[i]);
+                    }
                 }
             }
 
@@ -2395,14 +2487,14 @@
             var syncActions = compareSyncFiles(allLocalFiles, allRemoteFiles);
 
             if (syncActions.toUpload.length === 0 && syncActions.toDownload.length === 0) {
-                alert("Everything is already in sync!\n\nFolders checked: " + allDateFolders.join(", "));
+                alert("Everything is already in sync!\n\nFolders checked: " + allSyncedFolders.join(", "));
                 progressStatusText.text = "";
                 progressOverallLabel.text = "";
                 return;
             }
 
             // Build confirmation message
-            var confirmMsg = "Folders: " + allDateFolders.join(", ") + "\n\n";
+            var confirmMsg = "Folders: " + allSyncedFolders.join(", ") + "\n\n";
 
             if (syncActions.toUpload.length > 0) {
                 confirmMsg += "FILES TO UPLOAD (" + syncActions.toUpload.length + "):\n";
