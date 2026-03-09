@@ -1,41 +1,42 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v1.0.3";
+    var SCRIPT_VERSION = "v2.0.1";
 
-    var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME + " " + SCRIPT_VERSION, undefined, {resizeable: true});
+    var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
-    // Create main group wrapper
     var mainGroup = panel.add("group", undefined);
     mainGroup.orientation = "column";
     mainGroup.alignment = ["fill", "fill"];
 
-    // ---- Title ----
-    var titleText = mainGroup.add("statictext", undefined, SCRIPT_NAME + " " + SCRIPT_VERSION);
+    // Version label
+    var titleText = mainGroup.add("statictext", undefined, SCRIPT_VERSION);
     titleText.alignment = ["center", "top"];
 
-    // Create buttons
-    var markerRevealButton = mainGroup.add("button", undefined, "Marker Reveal");
-    var popInButton = mainGroup.add("button", undefined, "Pop In");
-    var easyMorphButton = mainGroup.add("button", undefined, "Easy Morph");
-    markerRevealButton.size = popInButton.size = easyMorphButton.size = [120, 30];
+    // Tabbed panel
+    var tabs = mainGroup.add("tabbedpanel");
+    tabs.alignment = ["fill", "fill"];
+
+    // ─── General Tab ──────────────────────────────────────────────────────────
+
+    var generalTab = tabs.add("tab", undefined, "General");
+    generalTab.orientation = "column";
+    generalTab.alignment = ["fill", "fill"];
+    generalTab.alignChildren = ["center", "top"];
+
+    var markerRevealButton = generalTab.add("button", undefined, "Marker Reveal");
+    var popInButton        = generalTab.add("button", undefined, "Pop In");
+    var easyMorphButton    = generalTab.add("button", undefined, "Easy Morph");
+    var doohOffsetButton   = generalTab.add("button", undefined, "DOOH Offset");
+    markerRevealButton.size = popInButton.size = easyMorphButton.size = doohOffsetButton.size = [120, 30];
 
     markerRevealButton.onClick = function() {
         app.beginUndoGroup("Marker Reveal Animation");
         try {
             var comp = app.project.activeItem;
-            if (!comp || !(comp instanceof CompItem)) {
-                alert("Please select a composition");
-                return;
-            }
-
-            var selectedLayers = comp.selectedLayers;
-            if (selectedLayers.length === 0) {
-                alert("Please select at least one layer");
-                return;
-            }
-
-            createRevealAnimation(comp, selectedLayers);
-
+            if (!comp || !(comp instanceof CompItem)) { alert("Please select a composition"); return; }
+            var sel = comp.selectedLayers;
+            if (sel.length === 0) { alert("Please select at least one layer"); return; }
+            createRevealAnimation(comp, sel);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         } finally {
@@ -47,19 +48,10 @@
         app.beginUndoGroup("Pop In Animation");
         try {
             var comp = app.project.activeItem;
-            if (!comp || !(comp instanceof CompItem)) {
-                alert("Please select a composition");
-                return;
-            }
-
-            var selectedLayers = comp.selectedLayers;
-            if (selectedLayers.length === 0) {
-                alert("Please select at least one layer");
-                return;
-            }
-
-            createPopInAnimation(comp, selectedLayers);
-
+            if (!comp || !(comp instanceof CompItem)) { alert("Please select a composition"); return; }
+            var sel = comp.selectedLayers;
+            if (sel.length === 0) { alert("Please select at least one layer"); return; }
+            createPopInAnimation(comp, sel);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         } finally {
@@ -71,35 +63,14 @@
         app.beginUndoGroup("Easy Morph Animation");
         try {
             var comp = app.project.activeItem;
-            if (!comp || !(comp instanceof CompItem)) {
-                alert("Please select a composition");
-                return;
-            }
-
-            var selectedLayers = comp.selectedLayers;
-            if (selectedLayers.length !== 2) {
-                alert("Please select exactly 2 layers");
-                return;
-            }
-
-            createEasyMorph(comp, selectedLayers);
-
+            if (!comp || !(comp instanceof CompItem)) { alert("Please select a composition"); return; }
+            var sel = comp.selectedLayers;
+            if (sel.length !== 2) { alert("Please select exactly 2 layers"); return; }
+            createEasyMorph(comp, sel);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         } finally {
             app.endUndoGroup();
-        }
-    };
-
-    var complexMorphButton = mainGroup.add("button", undefined, "Complex Morph");
-    var doohOffsetButton = mainGroup.add("button", undefined, "DOOH Offset");
-    complexMorphButton.size = doohOffsetButton.size = [120, 30];
-
-    complexMorphButton.onClick = function() {
-        try {
-            complexMorphSetup();
-        } catch (err) {
-            alert("An error occurred: " + err.toString());
         }
     };
 
@@ -107,19 +78,10 @@
         app.beginUndoGroup("DOOH Offset");
         try {
             var comp = app.project.activeItem;
-            if (!comp || !(comp instanceof CompItem)) {
-                alert("Please select a composition");
-                return;
-            }
-
-            var selectedLayers = comp.selectedLayers;
-            if (selectedLayers.length === 0) {
-                alert("Please select at least one layer");
-                return;
-            }
-
-            createDoohOffset(comp, selectedLayers);
-
+            if (!comp || !(comp instanceof CompItem)) { alert("Please select a composition"); return; }
+            var sel = comp.selectedLayers;
+            if (sel.length === 0) { alert("Please select at least one layer"); return; }
+            createDoohOffset(comp, sel);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         } finally {
@@ -127,11 +89,95 @@
         }
     };
 
-    // Setup Panel Sizing
+    // ─── Complex Morph Tab ────────────────────────────────────────────────────
+
+    var morphTab = tabs.add("tab", undefined, "Complex Morph");
+    morphTab.orientation = "column";
+    morphTab.alignment = ["fill", "fill"];
+
+    // Use an inner group for reliable margins/spacing across all AE versions
+    var morphContent = morphTab.add("group");
+    morphContent.orientation = "column";
+    morphContent.alignment = ["fill", "fill"];
+    morphContent.margins = 8;
+    morphContent.spacing = 5;
+
+    // layerRefs stores { layer: AVLayer, compName: string, layerName: string }
+    var layerRefs = {};
+    var fieldRefs = {};
+    var layerKeys = ["white small", "red small", "blue small", "white big", "red big", "blue big"];
+
+    for (var k = 0; k < layerKeys.length; k++) {
+        (function(key) {
+            var row = morphContent.add("group");
+            row.orientation = "row";
+            row.alignment = ["fill", "top"];
+            row.spacing = 4;
+
+            var lbl = row.add("statictext", undefined, key + ":");
+
+            var fld = row.add("edittext", undefined, "");
+            fld.enabled = false;
+            fld.alignment = ["fill", "center"];
+            fieldRefs[key] = fld;
+
+            var btn = row.add("button", undefined, "Set");
+            btn.alignment = ["right", "center"];
+            btn.preferredSize = [60, 24];
+
+            btn.onClick = function() {
+                var activeComp = app.project.activeItem;
+                if (!activeComp || !(activeComp instanceof CompItem)) {
+                    alert("Activate a composition first.");
+                    return;
+                }
+                if (activeComp.selectedLayers.length === 0) {
+                    alert("Select a layer in the active composition.");
+                    return;
+                }
+                var layer = activeComp.selectedLayers[0];
+                layerRefs[key] = {
+                    layer:     layer,
+                    compName:  activeComp.name,
+                    layerName: layer.name
+                };
+                fld.text = activeComp.name + " / " + layer.name;
+            };
+        })(layerKeys[k]);
+    }
+
+    var resetBtn = morphContent.add("button", undefined, "Reset");
+    resetBtn.alignment = ["right", "top"];
+    resetBtn.preferredSize = [60, 22];
+    resetBtn.onClick = function() {
+        for (var i = 0; i < layerKeys.length; i++) {
+            layerRefs[layerKeys[i]] = undefined;
+            fieldRefs[layerKeys[i]].text = "";
+        }
+    };
+
+    morphContent.add("statictext", undefined, "Select 3 solids in main comp, then:").alignment = ["fill", "top"];
+
+    var applyMorphBtn = morphContent.add("button", undefined, "Apply Complex Morph");
+    applyMorphBtn.alignment = ["fill", "bottom"];
+
+    applyMorphBtn.onClick = function() {
+        try {
+            complexMorphSetupV2(layerRefs);
+        } catch (err) {
+            alert("An error occurred: " + err.toString());
+        }
+    };
+
+    // ─── Panel Setup ──────────────────────────────────────────────────────────
+
     panel.layout.layout(true);
+
+    // TabbedPanel layout only measures the first (active) tab. Set an explicit
+    // minimum size large enough to hold the Complex Morph tab's 6 capture rows.
+    tabs.minimumSize = [200, 260];
     mainGroup.minimumSize = mainGroup.size;
 
-    // Make the panel resizeable
     panel.layout.resize();
     panel.onResizing = panel.onResize = function() {
         this.layout.resize();
@@ -143,140 +189,106 @@
     }
 })(this);
 
+// ─── Shared helper functions (unchanged from V1) ──────────────────────────────
+
 function getLayerSourceSize(layer) {
-    // Get the actual source footage dimensions
     var width = 0;
     var height = 0;
-
     if (layer.source && layer.source.width && layer.source.height) {
         width = layer.source.width;
         height = layer.source.height;
     } else {
-        // Fallback to sourceRectAtTime if no source available
         var rect = layer.sourceRectAtTime(0, false);
         width = rect.width;
         height = rect.height;
     }
-
     return [width, height];
 }
 
 function createEasyMorph(comp, selectedLayers) {
-    // Check comp fps
     if (comp.frameRate !== 25) {
         alert("Warning: Composition frame rate is " + comp.frameRate + " fps, not 25 fps");
     }
 
-    // Determine main and ref layers based on index
     var mainLayer, refLayer;
     if (selectedLayers[0].index < selectedLayers[1].index) {
         mainLayer = selectedLayers[0];
-        refLayer = selectedLayers[1];
+        refLayer  = selectedLayers[1];
     } else {
         mainLayer = selectedLayers[1];
-        refLayer = selectedLayers[0];
+        refLayer  = selectedLayers[0];
     }
 
-    // Get current time
-    var currentTime = comp.time;
+    var currentTime   = comp.time;
     var frameDuration = comp.frameDuration;
 
-    // Timeline:
-    // 0-15: Forward animation (position/scale)
-    // 0-10: Forward blend (10 frames, starts at 0)
-    // 15-25: Hold (10 frames)
-    // 25-40: Reverse animation (position/scale)
-    // 30-40: Reverse blend (10 frames, starts 5 frames in)
-
-    var forwardEndTime = currentTime + (15 * frameDuration);
+    var forwardEndTime    = currentTime + (15 * frameDuration);
     var blendForwardStart = currentTime;
-    var blendForwardEnd = currentTime + (10 * frameDuration);
-
-    var reverseStartTime = currentTime + (25 * frameDuration);
-    var reverseEndTime = currentTime + (40 * frameDuration);
+    var blendForwardEnd   = currentTime + (10 * frameDuration);
+    var reverseStartTime  = currentTime + (25 * frameDuration);
+    var reverseEndTime    = currentTime + (40 * frameDuration);
     var blendReverseStart = currentTime + (30 * frameDuration);
-    var blendReverseEnd = currentTime + (40 * frameDuration);
+    var blendReverseEnd   = currentTime + (40 * frameDuration);
 
-    // Get actual source dimensions
     var mainSize = getLayerSourceSize(mainLayer);
-    var refSize = getLayerSourceSize(refLayer);
+    var refSize  = getLayerSourceSize(refLayer);
 
-    // Get current positions
     var mainPosition = mainLayer.property("Transform").property("Position");
-    var refPosition = refLayer.property("Transform").property("Position");
-    var mainScale = mainLayer.property("Transform").property("Scale");
+    var refPosition  = refLayer.property("Transform").property("Position");
+    var mainScale    = mainLayer.property("Transform").property("Scale");
 
     var mainPos = mainPosition.value;
-    var refPos = refPosition.value;
+    var refPos  = refPosition.value;
 
-    // Calculate scale needed to match ref size
     var scaleX = (refSize[0] / mainSize[0]) * 100;
     var scaleY = (refSize[1] / mainSize[1]) * 100;
 
-    // Check if layer is 3D and preserve Z scale
     var currentScale = mainScale.value;
     var refScale, mainScaleValue;
     if (currentScale.length === 3) {
-        // 3D layer - preserve Z value
-        refScale = [scaleX, scaleY, currentScale[2]];
+        refScale       = [scaleX, scaleY, currentScale[2]];
         mainScaleValue = [100, 100, currentScale[2]];
     } else {
-        // 2D layer
-        refScale = [scaleX, scaleY];
+        refScale       = [scaleX, scaleY];
         mainScaleValue = [100, 100];
     }
 
-    // Enable motion blur on main layer
     mainLayer.motionBlur = true;
 
-    // Create easing objects (66% incoming, 44% outgoing)
-    var easeIn = new KeyframeEase(0, 66);
+    var easeIn  = new KeyframeEase(0, 66);
     var easeOut = new KeyframeEase(0, 44);
 
-    // FORWARD ANIMATION: Position
     mainPosition.setValueAtTime(currentTime, refPos);
     mainPosition.setValueAtTime(forwardEndTime, mainPos);
-
     var posKey1 = mainPosition.nearestKeyIndex(currentTime);
     var posKey2 = mainPosition.nearestKeyIndex(forwardEndTime);
     mainPosition.setTemporalEaseAtKey(posKey1, [easeIn], [easeOut]);
     mainPosition.setTemporalEaseAtKey(posKey2, [easeIn], [easeOut]);
 
-    // REVERSE ANIMATION: Position
     mainPosition.setValueAtTime(reverseStartTime, mainPos);
     mainPosition.setValueAtTime(reverseEndTime, refPos);
-
     var posKey3 = mainPosition.nearestKeyIndex(reverseStartTime);
     var posKey4 = mainPosition.nearestKeyIndex(reverseEndTime);
     mainPosition.setTemporalEaseAtKey(posKey3, [easeIn], [easeOut]);
     mainPosition.setTemporalEaseAtKey(posKey4, [easeIn], [easeOut]);
 
-    // FORWARD ANIMATION: Scale
     mainScale.setValueAtTime(currentTime, refScale);
     mainScale.setValueAtTime(forwardEndTime, mainScaleValue);
-
-    var scaleKey1 = mainScale.nearestKeyIndex(currentTime);
-    var scaleKey2 = mainScale.nearestKeyIndex(forwardEndTime);
-
-    // Check if scale is 3D (has 3 dimensions) and apply appropriate easing
+    var scaleKey1       = mainScale.nearestKeyIndex(currentTime);
+    var scaleKey2       = mainScale.nearestKeyIndex(forwardEndTime);
     var scaleDimensions = mainScale.value.length;
     if (scaleDimensions === 3) {
-        // 3D scale (X, Y, Z)
         mainScale.setTemporalEaseAtKey(scaleKey1, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
         mainScale.setTemporalEaseAtKey(scaleKey2, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
     } else {
-        // 2D scale (X, Y)
         mainScale.setTemporalEaseAtKey(scaleKey1, [easeIn], [easeOut]);
         mainScale.setTemporalEaseAtKey(scaleKey2, [easeIn], [easeOut]);
     }
 
-    // REVERSE ANIMATION: Scale
     mainScale.setValueAtTime(reverseStartTime, mainScaleValue);
     mainScale.setValueAtTime(reverseEndTime, refScale);
-
     var scaleKey3 = mainScale.nearestKeyIndex(reverseStartTime);
     var scaleKey4 = mainScale.nearestKeyIndex(reverseEndTime);
-
     if (scaleDimensions === 3) {
         mainScale.setTemporalEaseAtKey(scaleKey3, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
         mainScale.setTemporalEaseAtKey(scaleKey4, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
@@ -285,63 +297,40 @@ function createEasyMorph(comp, selectedLayers) {
         mainScale.setTemporalEaseAtKey(scaleKey4, [easeIn], [easeOut]);
     }
 
-    // Add Blend effect to main layer
-    var effects = mainLayer.property("Effects");
+    var effects     = mainLayer.property("Effects");
     var blendEffect = effects.addProperty("ADBE Blend");
+    blendEffect.property("ADBE Blend-0001").setValue(refLayer.index);
+    blendEffect.property("ADBE Blend-0004").setValue(2);
 
-    // Set "Blend With Layer" to reference layer
-    var blendWithLayer = blendEffect.property("ADBE Blend-0001");
-    blendWithLayer.setValue(refLayer.index);
-
-    // Set "If Layer Sizes Differ" to "Stretch to fit" (value 2)
-    var ifLayerSizesDiffer = blendEffect.property("ADBE Blend-0004");
-    ifLayerSizesDiffer.setValue(2);
-
-    // FORWARD ANIMATION: Blend (10 frames duration, starts at 0)
     var blendWithOriginal = blendEffect.property("ADBE Blend-0003");
     blendWithOriginal.setValueAtTime(blendForwardStart, 0);
     blendWithOriginal.setValueAtTime(blendForwardEnd, 1);
-
     var blendKey1 = blendWithOriginal.nearestKeyIndex(blendForwardStart);
     var blendKey2 = blendWithOriginal.nearestKeyIndex(blendForwardEnd);
-
-    // Set interpolation type to bezier first
     blendWithOriginal.setInterpolationTypeAtKey(blendKey1, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
     blendWithOriginal.setInterpolationTypeAtKey(blendKey2, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-
-    // Now apply easing - for 1D properties, need array with 1 element
     blendWithOriginal.setTemporalEaseAtKey(blendKey1, [easeIn], [easeOut]);
     blendWithOriginal.setTemporalEaseAtKey(blendKey2, [easeIn], [easeOut]);
 
-    // REVERSE ANIMATION: Blend (starts 5 frames in, 10 frames duration)
     blendWithOriginal.setValueAtTime(blendReverseStart, 1);
     blendWithOriginal.setValueAtTime(blendReverseEnd, 0);
-
     var blendKey3 = blendWithOriginal.nearestKeyIndex(blendReverseStart);
     var blendKey4 = blendWithOriginal.nearestKeyIndex(blendReverseEnd);
-
-    // Set interpolation type to bezier first
     blendWithOriginal.setInterpolationTypeAtKey(blendKey3, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
     blendWithOriginal.setInterpolationTypeAtKey(blendKey4, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-
-    // Now apply easing
     blendWithOriginal.setTemporalEaseAtKey(blendKey3, [easeIn], [easeOut]);
     blendWithOriginal.setTemporalEaseAtKey(blendKey4, [easeIn], [easeOut]);
 
-    // Hide the reference layer
     refLayer.enabled = false;
 }
 
 function getLayerHeight(comp, layer) {
-    // Check if layer has masks
     if (layer.mask && layer.mask.numProperties > 0) {
-        // Create temporary shape layer to get masked dimensions
         var shapeLayer = createShapeFromMask(comp, layer);
         var height = shapeLayer.sourceRectAtTime(comp.time, true).height;
         shapeLayer.remove();
         return height;
     } else {
-        // Use regular layer height
         return layer.sourceRectAtTime(comp.time, false).height;
     }
 }
@@ -349,200 +338,167 @@ function getLayerHeight(comp, layer) {
 function createPopInAnimation(comp, selectedLayers) {
     for (var i = 0; i < selectedLayers.length; i++) {
         var layer = selectedLayers[i];
-
-        // Enable motion blur
         layer.motionBlur = true;
 
-        var currentTime = comp.time;
+        var currentTime   = comp.time;
         var frameDuration = comp.frameDuration;
-        var forwardTime = currentTime + (15 * frameDuration);
+        var forwardTime   = currentTime + (15 * frameDuration);
+        var layerHeight   = getLayerHeight(comp, layer);
 
-        // Get layer height
-        var layerHeight = getLayerHeight(comp, layer);
-
-        // Animate position
         var position = layer.property("Position");
-        var endPos = position.value;
+        var endPos   = position.value;
         var startPos = [endPos[0], endPos[1] + (layerHeight * 2)];
-
         position.setValueAtTime(currentTime, startPos);
         position.setValueAtTime(forwardTime, endPos);
 
-        // Set position keyframe easing
-        var forwardKeyIndex = position.nearestKeyIndex(forwardTime);
+        var forwardKeyIndex  = position.nearestKeyIndex(forwardTime);
         var backwardKeyIndex = position.nearestKeyIndex(currentTime);
-
-        var easeIn = new KeyframeEase(0, 66);
+        var easeIn  = new KeyframeEase(0, 66);
         var easeOut = new KeyframeEase(0, 44);
-
-        position.setTemporalEaseAtKey(forwardKeyIndex, [easeIn], [easeOut]);
+        position.setTemporalEaseAtKey(forwardKeyIndex,  [easeIn], [easeOut]);
         position.setTemporalEaseAtKey(backwardKeyIndex, [easeIn], [easeOut]);
 
-        // Animate opacity
         var opacity = layer.property("Opacity");
         opacity.setValueAtTime(currentTime, 0);
         opacity.setValueAtTime(forwardTime, 100);
-
-        // Set opacity keyframe easing
-        forwardKeyIndex = opacity.nearestKeyIndex(forwardTime);
+        forwardKeyIndex  = opacity.nearestKeyIndex(forwardTime);
         backwardKeyIndex = opacity.nearestKeyIndex(currentTime);
-
-        opacity.setTemporalEaseAtKey(forwardKeyIndex, [easeIn], [easeOut]);
+        opacity.setTemporalEaseAtKey(forwardKeyIndex,  [easeIn], [easeOut]);
         opacity.setTemporalEaseAtKey(backwardKeyIndex, [easeIn], [easeOut]);
     }
 }
 
-
 function createShapeFromMask(comp, layer) {
     var shapeLayer = comp.layers.addShape();
     shapeLayer.name = layer.name + " Shape";
-
     var masks = layer.mask;
     if (masks && masks.numProperties > 0) {
         for (var i = 1; i <= masks.numProperties; i++) {
-            var maskPath = masks.property(i).property("maskPath");
+            var maskPath  = masks.property(i).property("maskPath");
             var maskShape = maskPath.value;
-
             var shapeGroup = shapeLayer.property("Contents").addProperty("ADBE Vector Group");
-            var shapePath = shapeGroup.property("Contents").addProperty("ADBE Vector Shape - Group");
+            var shapePath  = shapeGroup.property("Contents").addProperty("ADBE Vector Shape - Group");
             shapePath.property("Path").setValue(maskShape);
-
             var fill = shapeGroup.property("Contents").addProperty("ADBE Vector Graphic - Fill");
             fill.property("Color").setValue([1, 0, 0]);
         }
     }
-
     return shapeLayer;
 }
 
 function createRevealAnimation(comp, selectedLayers) {
     for (var i = 0; i < selectedLayers.length; i++) {
         var originalLayer = selectedLayers[i];
-
-        // Create shape layer from mask
-        var shapeLayer = createShapeFromMask(comp, originalLayer);
-
-        // Enable motion blur for the original layer
+        var shapeLayer    = createShapeFromMask(comp, originalLayer);
         originalLayer.motionBlur = true;
 
-        // Duplicate layer
         var duplicateLayer = originalLayer.duplicate();
-
-        // Hide the duplicated layer
         duplicateLayer.enabled = false;
-
-        // Set track matte settings for the original layer only
         originalLayer.setTrackMatte(duplicateLayer, TrackMatteType.ALPHA);
 
-        // Get current time
-        var currentTime = comp.time;
-
-        // Get size from shape layer
-        var layerWidth = 0;
-        var shapeRect = shapeLayer.sourceRectAtTime(currentTime, true);
-        layerWidth = shapeRect.width;
-
-        // Create position keyframes
-        var position = originalLayer.property("Position");
-        var startPos = position.value;
-
-        // Go 15 frames forward and set keyframe
+        var currentTime   = comp.time;
+        var layerWidth    = shapeLayer.sourceRectAtTime(currentTime, true).width;
+        var position      = originalLayer.property("Position");
+        var startPos      = position.value;
         var frameDuration = comp.frameDuration;
-        var forwardTime = currentTime + (15 * frameDuration);
+        var forwardTime   = currentTime + (15 * frameDuration);
         position.setValueAtTime(forwardTime, startPos);
 
-        // Go back 15 frames
-        var backwardTime = currentTime;
-
-        // Move layer left by width + 10%
         var endPos = [startPos[0] - (layerWidth * 1.1), startPos[1]];
-        position.setValueAtTime(backwardTime, endPos);
+        position.setValueAtTime(currentTime, endPos);
 
-        // Set keyframe easing
-        var forwardKeyIndex = position.nearestKeyIndex(forwardTime);
-        var backwardKeyIndex = position.nearestKeyIndex(backwardTime);
-
-        // Create easing objects
-        var easeIn = new KeyframeEase(0, 66);
+        var forwardKeyIndex  = position.nearestKeyIndex(forwardTime);
+        var backwardKeyIndex = position.nearestKeyIndex(currentTime);
+        var easeIn  = new KeyframeEase(0, 66);
         var easeOut = new KeyframeEase(0, 44);
-
-        // Apply easing to both keyframes
-        position.setTemporalEaseAtKey(forwardKeyIndex, [easeIn], [easeOut]);
+        position.setTemporalEaseAtKey(forwardKeyIndex,  [easeIn], [easeOut]);
         position.setTemporalEaseAtKey(backwardKeyIndex, [easeIn], [easeOut]);
 
-        // Delete the shape layer now that we're done with it
         shapeLayer.remove();
     }
 }
 
-// ─── Complex Morph ────────────────────────────────────────────────────────────
+// ─── Complex Morph V2 ─────────────────────────────────────────────────────────
 
-function complexMorphSetup() {
-    var comp = app.project.activeItem;
-    if (!comp || !(comp instanceof CompItem)) {
-        alert("Please activate a composition first.");
-        return;
+function complexMorphSetupV2(layerRefs) {
+    var layerKeys = ["white small", "red small", "blue small", "white big", "red big", "blue big"];
+
+    // Validate all 6 refs are captured
+    var notSet = [];
+    for (var i = 0; i < layerKeys.length; i++) {
+        if (!layerRefs[layerKeys[i]]) notSet.push(layerKeys[i]);
     }
-
-    var REQUIRED_NAMES = [
-        "white big", "red big", "blue big",
-        "white small", "red small", "blue small",
-        "white solid", "red solid", "blue solid"
-    ];
-
-    var selectedLayers = comp.selectedLayers;
-    var selectedNames = [];
-    for (var i = 0; i < selectedLayers.length; i++) {
-        selectedNames.push(selectedLayers[i].name);
-    }
-
-    var missing = [];
-    for (var i = 0; i < REQUIRED_NAMES.length; i++) {
-        var found = false;
-        for (var j = 0; j < selectedNames.length; j++) {
-            if (selectedNames[j] === REQUIRED_NAMES[i]) { found = true; break; }
-        }
-        if (!found) missing.push(REQUIRED_NAMES[i]);
-    }
-
-    var extra = [];
-    for (var i = 0; i < selectedNames.length; i++) {
-        var isExpected = false;
-        for (var j = 0; j < REQUIRED_NAMES.length; j++) {
-            if (REQUIRED_NAMES[j] === selectedNames[i]) { isExpected = true; break; }
-        }
-        if (!isExpected) extra.push(selectedNames[i]);
-    }
-
-    // Catch duplicate names (e.g., two layers both named "white big") before name-matching
-    if (selectedLayers.length !== REQUIRED_NAMES.length) {
-        var msg = "Please select exactly 9 layers (currently " + selectedLayers.length + " selected).";
+    if (notSet.length > 0) {
+        var msg = "Please capture all 6 reference layers first.\n\nNot set:";
+        for (var i = 0; i < notSet.length; i++) msg += "\n  \u2022 " + notSet[i];
         alert(msg);
         return;
     }
 
-    if (missing.length > 0 || extra.length > 0) {
-        var msg = "Incorrect selection. Select exactly these 9 layers:\n";
-        for (var i = 0; i < REQUIRED_NAMES.length; i++) {
-            msg += "\n  \u2022 " + REQUIRED_NAMES[i];
+    // Validate stored layer refs are still accessible (guards against deleted layers)
+    var staleRefs = [];
+    for (var i = 0; i < layerKeys.length; i++) {
+        try {
+            var testAccess = layerRefs[layerKeys[i]].layer.name;
+        } catch (e) {
+            staleRefs.push(layerKeys[i] + " (was: " + layerRefs[layerKeys[i]].compName + " / " + layerRefs[layerKeys[i]].layerName + ")");
         }
+    }
+    if (staleRefs.length > 0) {
+        var msg = "Some captured layers are no longer accessible. Please re-capture:";
+        for (var i = 0; i < staleRefs.length; i++) msg += "\n  \u2022 " + staleRefs[i];
+        alert(msg);
+        return;
+    }
+
+    // Get solids from current comp selection
+    var comp = app.project.activeItem;
+    if (!comp || !(comp instanceof CompItem)) {
+        alert("Please activate the composition containing the solids.");
+        return;
+    }
+
+    var selectedLayers = comp.selectedLayers;
+    var SOLID_NAMES    = ["white solid", "red solid", "blue solid"];
+
+    if (selectedLayers.length !== 3) {
+        var msg = "Please select exactly 3 layers:\n  \u2022 white solid\n  \u2022 red solid\n  \u2022 blue solid\n\n(currently " + selectedLayers.length + " selected)";
+        alert(msg);
+        return;
+    }
+
+    var layerMap = {};
+    var extra    = [];
+    for (var i = 0; i < selectedLayers.length; i++) {
+        var layerName = selectedLayers[i].name;
+        var isExpected = false;
+        for (var j = 0; j < SOLID_NAMES.length; j++) {
+            if (SOLID_NAMES[j] === layerName) { isExpected = true; break; }
+        }
+        if (isExpected) layerMap[layerName] = selectedLayers[i];
+        else extra.push(layerName);
+    }
+
+    var missing = [];
+    for (var i = 0; i < SOLID_NAMES.length; i++) {
+        if (!layerMap[SOLID_NAMES[i]]) missing.push(SOLID_NAMES[i]);
+    }
+
+    if (missing.length > 0 || extra.length > 0) {
+        var msg = "Selection must be exactly: white solid, red solid, blue solid.";
         if (missing.length > 0) {
             msg += "\n\nMissing:";
             for (var i = 0; i < missing.length; i++) msg += "\n  \u2022 " + missing[i];
         }
         if (extra.length > 0) {
-            msg += "\n\nDeselect these:";
+            msg += "\n\nUnexpected:";
             for (var i = 0; i < extra.length; i++) msg += "\n  \u2022 " + extra[i];
         }
         alert(msg);
         return;
     }
 
-    var layerMap = {};
-    for (var i = 0; i < selectedLayers.length; i++) {
-        layerMap[selectedLayers[i].name] = selectedLayers[i];
-    }
-
+    // t0 = 5 seconds (hardcoded start point, same as V1)
     var fd = comp.frameDuration;
     var t0 = 5;
     var t1 = t0 + 15 * fd;
@@ -555,24 +511,11 @@ function complexMorphSetup() {
         for (var c = 0; c < colors.length; c++) {
             var col = colors[c];
             applyComplexMorphToColor(
-                layerMap[col + " small"],
-                layerMap[col + " big"],
+                layerRefs[col + " small"].layer,
+                layerRefs[col + " big"].layer,
                 layerMap[col + " solid"],
                 t0, t1, t2, t3
             );
-        }
-
-        // Hide reference layers and mark as guide layers
-        var refNames = ["white big", "red big", "blue big", "white small", "red small", "blue small"];
-        for (var i = 0; i < refNames.length; i++) {
-            layerMap[refNames[i]].enabled = false;
-            layerMap[refNames[i]].guideLayer = true;
-        }
-
-        // Ensure solids are visible
-        var solidNames = ["white solid", "red solid", "blue solid"];
-        for (var i = 0; i < solidNames.length; i++) {
-            layerMap[solidNames[i]].enabled = true;
         }
 
         app.endUndoGroup();
@@ -588,9 +531,16 @@ function applyComplexMorphToColor(smallLayer, bigLayer, solidLayer, t0, t1, t2, 
     var easeOut = new KeyframeEase(0, 44);
 
     // --- Position keyframes ---
+    // Note: position values are read from the PSD layers' own comp coordinate space.
+    // This works correctly when all comps share the same canvas dimensions.
     var smallPos = smallLayer.property("Transform").property("Position").value;
     var bigPos   = bigLayer.property("Transform").property("Position").value;
     var posProp  = solidLayer.property("Transform").property("Position");
+
+    // Clear any existing position keyframes
+    while (posProp.numKeys > 0) {
+        posProp.removeKey(1);
+    }
 
     posProp.setValueAtTime(t0, smallPos);
     posProp.setValueAtTime(t1, bigPos);
@@ -652,8 +602,8 @@ function transformMaskShape(shape, offset) {
     }
     var newShape = new Shape();
     newShape.vertices   = newVertices;
-    newShape.inTangents  = shape.inTangents;  // relative to vertex, no offset needed
-    newShape.outTangents = shape.outTangents; // relative to vertex, no offset needed
+    newShape.inTangents  = shape.inTangents;
+    newShape.outTangents = shape.outTangents;
     newShape.closed      = shape.closed;
     return newShape;
 }
@@ -661,7 +611,6 @@ function transformMaskShape(shape, offset) {
 function getReferenceMask(layer) {
     var masks = layer.mask;
     if (!masks || masks.numProperties === 0) return null;
-    // Prefer the mask set to mode 'None' (the reference shape), fall back to first mask
     for (var i = 1; i <= masks.numProperties; i++) {
         var mask = masks.property(i);
         if (mask.maskMode === MaskMode.NONE) return mask;
@@ -672,19 +621,13 @@ function getReferenceMask(layer) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function createDoohOffset(comp, selectedLayers) {
-    // Sort layers by X (ascending) and Y (descending for same X)
     var sortedLayers = selectedLayers.slice().sort(function(a, b) {
         var posA = a.property("Position").value;
         var posB = b.property("Position").value;
-
-        if (posA[0] === posB[0]) {
-            // Same X position, sort by Y in descending order (higher Y first)
-            return posB[1] - posA[1];
-        }
+        if (posA[0] === posB[0]) return posB[1] - posA[1];
         return posA[0] - posB[0];
     });
 
-    // Expression to apply
     var expression = '// Get target position (the position keyframes/value set on the layer)\n' +
         'var targetPos = value;\n' +
         '// Get null object references\n' +
@@ -715,38 +658,26 @@ function createDoohOffset(comp, selectedLayers) {
         '    targetPos;\n' +
         '}';
 
-    var lastXPos = null;
+    var lastXPos    = null;
     var frameOffset = 0;
-    var subOffset = 0;
+    var subOffset   = 0;
 
     for (var i = 0; i < sortedLayers.length; i++) {
-        var layer = sortedLayers[i];
+        var layer      = sortedLayers[i];
         var currentPos = layer.property("Position").value;
-
-        // Apply the expression
         layer.property("Position").expression = expression;
 
-        // Skip offset for the first layer
-        if (i === 0) {
-            lastXPos = currentPos[0];
-            continue;
-        }
+        if (i === 0) { lastXPos = currentPos[0]; continue; }
 
-        // Handle frame offsets
         if (currentPos[0] !== lastXPos) {
-            // New X position
             frameOffset += 2;
-            subOffset = 0;
-            lastXPos = currentPos[0];
+            subOffset    = 0;
+            lastXPos     = currentPos[0];
         } else {
-            // Same X position, increment subOffset
             subOffset += 1;
         }
 
-        // Calculate total offset in frames
         var totalOffset = frameOffset - subOffset;
-
-        // Apply the offset
         if (totalOffset > 0) {
             layer.startTime += (totalOffset * comp.frameDuration);
         }
