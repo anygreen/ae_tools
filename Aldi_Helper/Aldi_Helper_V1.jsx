@@ -9,6 +9,10 @@
     mainGroup.orientation = "column";
     mainGroup.alignment = ["fill", "fill"];
 
+    // ---- Title ----
+    var titleText = mainGroup.add("statictext", undefined, SCRIPT_NAME + " " + SCRIPT_VERSION);
+    titleText.alignment = ["center", "top"];
+
     // Create buttons
     var markerRevealButton = mainGroup.add("button", undefined, "Marker Reveal");
     var popInButton = mainGroup.add("button", undefined, "Pop In");
