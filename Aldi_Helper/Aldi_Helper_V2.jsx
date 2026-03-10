@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.0.1";
+    var SCRIPT_VERSION = "v2.0.2";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -102,24 +102,26 @@
     morphContent.margins = 8;
     morphContent.spacing = 5;
 
-    // layerRefs stores { layer: AVLayer, compName: string, layerName: string }
-    var layerRefs = {};
-    var fieldRefs = {};
-    var layerKeys = ["white small", "red small", "blue small", "white big", "red big", "blue big"];
+    // groups stores { layers: [ {layer, compName, layerName}, ... ] } indexed by "small"/"big"
+    // Each group holds 3 layer refs sorted by index (top=0, mid=1, bottom=2)
+    var groups = { "small": null, "big": null };
+    var groupFields = {};
+    var groupKeys = ["small", "big"];
+    var groupLabels = { "small": "Kachel small", "big": "Kachel big" };
 
-    for (var k = 0; k < layerKeys.length; k++) {
+    for (var k = 0; k < groupKeys.length; k++) {
         (function(key) {
             var row = morphContent.add("group");
             row.orientation = "row";
             row.alignment = ["fill", "top"];
             row.spacing = 4;
 
-            var lbl = row.add("statictext", undefined, key + ":");
+            var lbl = row.add("statictext", undefined, groupLabels[key] + ":");
 
             var fld = row.add("edittext", undefined, "");
             fld.enabled = false;
             fld.alignment = ["fill", "center"];
-            fieldRefs[key] = fld;
+            groupFields[key] = fld;
 
             var btn = row.add("button", undefined, "Set");
             btn.alignment = ["right", "center"];
@@ -131,28 +133,40 @@
                     alert("Activate a composition first.");
                     return;
                 }
-                if (activeComp.selectedLayers.length === 0) {
-                    alert("Select a layer in the active composition.");
+                if (activeComp.selectedLayers.length !== 3) {
+                    alert("Select exactly 3 layers for " + groupLabels[key] + ".");
                     return;
                 }
-                var layer = activeComp.selectedLayers[0];
-                layerRefs[key] = {
-                    layer:     layer,
-                    compName:  activeComp.name,
-                    layerName: layer.name
-                };
-                fld.text = activeComp.name + " / " + layer.name;
+
+                // Copy into plain array and sort by layer index (top of stack = lowest index)
+                var sel = [];
+                for (var i = 0; i < activeComp.selectedLayers.length; i++) {
+                    sel.push(activeComp.selectedLayers[i]);
+                }
+                sel.sort(function(a, b) { return a.index - b.index; });
+
+                groups[key] = [];
+                var names = [];
+                for (var i = 0; i < sel.length; i++) {
+                    groups[key].push({
+                        layer:     sel[i],
+                        compName:  activeComp.name,
+                        layerName: sel[i].name
+                    });
+                    names.push(sel[i].name);
+                }
+                fld.text = names.join(" / ");
             };
-        })(layerKeys[k]);
+        })(groupKeys[k]);
     }
 
     var resetBtn = morphContent.add("button", undefined, "Reset");
     resetBtn.alignment = ["right", "top"];
     resetBtn.preferredSize = [60, 22];
     resetBtn.onClick = function() {
-        for (var i = 0; i < layerKeys.length; i++) {
-            layerRefs[layerKeys[i]] = undefined;
-            fieldRefs[layerKeys[i]].text = "";
+        for (var i = 0; i < groupKeys.length; i++) {
+            groups[groupKeys[i]] = null;
+            groupFields[groupKeys[i]].text = "";
         }
     };
 
@@ -163,7 +177,7 @@
 
     applyMorphBtn.onClick = function() {
         try {
-            complexMorphSetupV2(layerRefs);
+            complexMorphSetupV2(groups);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         }
@@ -174,8 +188,8 @@
     panel.layout.layout(true);
 
     // TabbedPanel layout only measures the first (active) tab. Set an explicit
-    // minimum size large enough to hold the Complex Morph tab's 6 capture rows.
-    tabs.minimumSize = [200, 260];
+    // minimum size large enough to hold the Complex Morph tab content.
+    tabs.minimumSize = [200, 200];
     mainGroup.minimumSize = mainGroup.size;
 
     panel.layout.resize();
@@ -420,28 +434,31 @@ function createRevealAnimation(comp, selectedLayers) {
 
 // ─── Complex Morph V2 ─────────────────────────────────────────────────────────
 
-function complexMorphSetupV2(layerRefs) {
-    var layerKeys = ["white small", "red small", "blue small", "white big", "red big", "blue big"];
-
-    // Validate all 6 refs are captured
-    var notSet = [];
-    for (var i = 0; i < layerKeys.length; i++) {
-        if (!layerRefs[layerKeys[i]]) notSet.push(layerKeys[i]);
-    }
-    if (notSet.length > 0) {
-        var msg = "Please capture all 6 reference layers first.\n\nNot set:";
-        for (var i = 0; i < notSet.length; i++) msg += "\n  \u2022 " + notSet[i];
+function complexMorphSetupV2(groups) {
+    // Validate both groups are captured
+    if (!groups["small"] || !groups["big"]) {
+        var missing = [];
+        if (!groups["small"]) missing.push("Kachel small");
+        if (!groups["big"])   missing.push("Kachel big");
+        var msg = "Please capture all groups first.\n\nNot set:";
+        for (var i = 0; i < missing.length; i++) msg += "\n  \u2022 " + missing[i];
         alert(msg);
         return;
     }
 
     // Validate stored layer refs are still accessible (guards against deleted layers)
     var staleRefs = [];
-    for (var i = 0; i < layerKeys.length; i++) {
-        try {
-            var testAccess = layerRefs[layerKeys[i]].layer.name;
-        } catch (e) {
-            staleRefs.push(layerKeys[i] + " (was: " + layerRefs[layerKeys[i]].compName + " / " + layerRefs[layerKeys[i]].layerName + ")");
+    var groupKeys = ["small", "big"];
+    var groupLabels = { "small": "Kachel small", "big": "Kachel big" };
+    for (var g = 0; g < groupKeys.length; g++) {
+        var grp = groups[groupKeys[g]];
+        for (var i = 0; i < grp.length; i++) {
+            try {
+                var testAccess = grp[i].layer.name;
+            } catch (e) {
+                staleRefs.push(groupLabels[groupKeys[g]] + " layer " + (i + 1) +
+                    " (was: " + grp[i].compName + " / " + grp[i].layerName + ")");
+            }
         }
     }
     if (staleRefs.length > 0) {
@@ -451,52 +468,24 @@ function complexMorphSetupV2(layerRefs) {
         return;
     }
 
-    // Get solids from current comp selection
+    // Get solids from the current comp selection
     var comp = app.project.activeItem;
     if (!comp || !(comp instanceof CompItem)) {
         alert("Please activate the composition containing the solids.");
         return;
     }
 
-    var selectedLayers = comp.selectedLayers;
-    var SOLID_NAMES    = ["white solid", "red solid", "blue solid"];
-
-    if (selectedLayers.length !== 3) {
-        var msg = "Please select exactly 3 layers:\n  \u2022 white solid\n  \u2022 red solid\n  \u2022 blue solid\n\n(currently " + selectedLayers.length + " selected)";
-        alert(msg);
+    if (comp.selectedLayers.length !== 3) {
+        alert("Please select exactly 3 solid layers in the active composition.\n(currently " + comp.selectedLayers.length + " selected)");
         return;
     }
 
-    var layerMap = {};
-    var extra    = [];
-    for (var i = 0; i < selectedLayers.length; i++) {
-        var layerName = selectedLayers[i].name;
-        var isExpected = false;
-        for (var j = 0; j < SOLID_NAMES.length; j++) {
-            if (SOLID_NAMES[j] === layerName) { isExpected = true; break; }
-        }
-        if (isExpected) layerMap[layerName] = selectedLayers[i];
-        else extra.push(layerName);
+    // Sort selected solids by layer index (top of stack = lowest index)
+    var solids = [];
+    for (var i = 0; i < comp.selectedLayers.length; i++) {
+        solids.push(comp.selectedLayers[i]);
     }
-
-    var missing = [];
-    for (var i = 0; i < SOLID_NAMES.length; i++) {
-        if (!layerMap[SOLID_NAMES[i]]) missing.push(SOLID_NAMES[i]);
-    }
-
-    if (missing.length > 0 || extra.length > 0) {
-        var msg = "Selection must be exactly: white solid, red solid, blue solid.";
-        if (missing.length > 0) {
-            msg += "\n\nMissing:";
-            for (var i = 0; i < missing.length; i++) msg += "\n  \u2022 " + missing[i];
-        }
-        if (extra.length > 0) {
-            msg += "\n\nUnexpected:";
-            for (var i = 0; i < extra.length; i++) msg += "\n  \u2022 " + extra[i];
-        }
-        alert(msg);
-        return;
-    }
+    solids.sort(function(a, b) { return a.index - b.index; });
 
     // t0 = 5 seconds (hardcoded start point, same as V1)
     var fd = comp.frameDuration;
@@ -507,13 +496,12 @@ function complexMorphSetupV2(layerRefs) {
 
     app.beginUndoGroup("Complex Morph Setup");
     try {
-        var colors = ["white", "red", "blue"];
-        for (var c = 0; c < colors.length; c++) {
-            var col = colors[c];
+        // Match by position in layer stack: index 0 = top, 1 = mid, 2 = bottom
+        for (var i = 0; i < 3; i++) {
             applyComplexMorphToColor(
-                layerRefs[col + " small"].layer,
-                layerRefs[col + " big"].layer,
-                layerMap[col + " solid"],
+                groups["small"][i].layer,
+                groups["big"][i].layer,
+                solids[i],
                 t0, t1, t2, t3
             );
         }
