@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.6.0";
+    var SCRIPT_VERSION = "v1.6.1";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -1990,6 +1990,7 @@
             app.beginUndoGroup("Version Up Compositions");
 
             var newComps = [];
+            var oldFolders = [];
 
             for (var i = 0; i < selectedComps.length; i++) {
                 var comp = selectedComps[i];
@@ -2020,12 +2021,22 @@
                     }
 
                     comp.parentFolder = oldFolder;
+
+                    // Track _old folders to collapse after all moves
+                    var alreadyTracked = false;
+                    for (var k = 0; k < oldFolders.length; k++) {
+                        if (oldFolders[k] === oldFolder) { alreadyTracked = true; break; }
+                    }
+                    if (!alreadyTracked) { oldFolders.push(oldFolder); }
                 }
             }
 
-            // Deselect old comps, select new ones
+            // Deselect old comps and _old folders, select new ones
             for (var i = 0; i < selectedComps.length; i++) {
                 selectedComps[i].selected = false;
+            }
+            for (var i = 0; i < oldFolders.length; i++) {
+                oldFolders[i].selected = false;
             }
             for (var i = 0; i < newComps.length; i++) {
                 newComps[i].selected = true;
