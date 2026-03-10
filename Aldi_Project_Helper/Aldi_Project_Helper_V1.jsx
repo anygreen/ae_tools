@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.5.0";
+    var SCRIPT_VERSION = "v1.6.0";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -1030,7 +1030,9 @@
     }
 
     /**
-     * Compares local and remote file lists to determine sync actions
+     * Compares local and remote file lists to determine sync actions.
+     * Uses the syncKey property (root + dateFolder + relativePath) as the
+     * unique map key, so files from different sub-projects never collide.
      * @param {Array} localFiles - Array of local file info
      * @param {Array} remoteFiles - Array of remote file info
      * @returns {Object} {toUpload: [], toDownload: []}
@@ -1039,26 +1041,27 @@
         var toUpload = [];
         var toDownload = [];
 
-        // Create lookup maps
         var localMap = {};
         var remoteMap = {};
 
         for (var i = 0; i < localFiles.length; i++) {
-            localMap[localFiles[i].relativePath] = localFiles[i];
+            var lKey = localFiles[i].syncKey || localFiles[i].relativePath;
+            localMap[lKey] = localFiles[i];
         }
 
         for (var i = 0; i < remoteFiles.length; i++) {
-            remoteMap[remoteFiles[i].relativePath] = remoteFiles[i];
+            var rKey = remoteFiles[i].syncKey || remoteFiles[i].relativePath;
+            remoteMap[rKey] = remoteFiles[i];
         }
 
-        // Find files to upload (local files not on remote)
+        // Files only on local → upload
         for (var path in localMap) {
             if (!remoteMap.hasOwnProperty(path)) {
                 toUpload.push(localMap[path]);
             }
         }
 
-        // Find files to download (remote files not on local)
+        // Files only on remote → download
         for (var path in remoteMap) {
             if (!localMap.hasOwnProperty(path)) {
                 toDownload.push(remoteMap[path]);
@@ -2402,10 +2405,24 @@
 
             var allLocalFiles = [];
             var allRemoteFiles = [];
+
+            // allSyncedFolders: [{rootLabel, dateFolder}] — used to build the summary message
             var allSyncedFolders = [];
+            // rootLabelsInOrder: root labels in scan order (deduped) — for grouped display
+            var rootLabelsInOrder = [];
+
+            // True when multiple roots exist (sub-projects or mixed inbox+sub-projects)
+            var hasMultipleRoots = scanRoots.length > 1;
 
             for (var r = 0; r < scanRoots.length; r++) {
                 var root = scanRoots[r];
+
+                // Track root labels in order (deduplicated)
+                var labelAlreadyTracked = false;
+                for (var ri = 0; ri < rootLabelsInOrder.length; ri++) {
+                    if (rootLabelsInOrder[ri] === root.label) { labelAlreadyTracked = true; break; }
+                }
+                if (!labelAlreadyTracked) rootLabelsInOrder.push(root.label);
 
                 progressStatusText.text = "Scanning " + root.label + "...";
                 panel.layout.layout(true);
@@ -2424,29 +2441,21 @@
                 }
                 remoteDateFolders.sort(function(a, b) { return b.localeCompare(a); });
 
-                // Combine local and remote date folders
+                // Merge local + remote date folders, keep most recent N
                 var combinedDateFolders = localDateFolders.slice();
                 for (var i = 0; i < remoteDateFolders.length; i++) {
                     var found = false;
                     for (var j = 0; j < combinedDateFolders.length; j++) {
-                        if (combinedDateFolders[j] === remoteDateFolders[i]) {
-                            found = true;
-                            break;
-                        }
+                        if (combinedDateFolders[j] === remoteDateFolders[i]) { found = true; break; }
                     }
-                    if (!found) {
-                        combinedDateFolders.push(remoteDateFolders[i]);
-                    }
+                    if (!found) combinedDateFolders.push(remoteDateFolders[i]);
                 }
                 combinedDateFolders.sort(function(a, b) { return b.localeCompare(a); });
                 combinedDateFolders = combinedDateFolders.slice(0, folderCount);
 
-                // Track which folders we're syncing (with label for display)
+                // Track synced folders as objects for grouped display later
                 for (var i = 0; i < combinedDateFolders.length; i++) {
-                    var folderLabel = root.label !== "inbox" && root.label !== "output"
-                        ? root.label + "/" + combinedDateFolders[i]
-                        : combinedDateFolders[i];
-                    allSyncedFolders.push(folderLabel);
+                    allSyncedFolders.push({rootLabel: root.label, dateFolder: combinedDateFolders[i]});
                 }
 
                 // Scan files in each date folder for this root
@@ -2464,7 +2473,12 @@
                         var localFiles = [];
                         scanFolderForFiles(localFolder, localDatePath, localFiles);
                         for (var i = 0; i < localFiles.length; i++) {
+                            localFiles[i].rootLabel = root.label;
                             localFiles[i].dateFolder = dateFolder;
+                            // syncKey is globally unique across all roots (prevents collisions)
+                            localFiles[i].syncKey = root.label + "/" + dateFolder + "/" + localFiles[i].relativePath;
+                            // displayPath shows sub-project context when multiple roots exist
+                            localFiles[i].displayPath = (hasMultipleRoots ? root.label + "/" : "") + dateFolder + "/" + localFiles[i].relativePath;
                             localFiles[i].fullLocalPath = localDatePath + "/" + localFiles[i].relativePath;
                             localFiles[i].fullRemotePath = remoteDatePath + "/" + localFiles[i].relativePath;
                             allLocalFiles.push(localFiles[i]);
@@ -2475,12 +2489,42 @@
                     var remoteFiles = [];
                     listFTPFilesRecursive(ftpConfig, remoteDatePath, "", remoteFiles);
                     for (var i = 0; i < remoteFiles.length; i++) {
+                        remoteFiles[i].rootLabel = root.label;
                         remoteFiles[i].dateFolder = dateFolder;
+                        remoteFiles[i].syncKey = root.label + "/" + dateFolder + "/" + remoteFiles[i].relativePath;
+                        remoteFiles[i].displayPath = (hasMultipleRoots ? root.label + "/" : "") + dateFolder + "/" + remoteFiles[i].relativePath;
                         remoteFiles[i].fullLocalPath = localDatePath + "/" + remoteFiles[i].relativePath;
                         remoteFiles[i].fullRemotePath = remoteDatePath + "/" + remoteFiles[i].relativePath;
                         allRemoteFiles.push(remoteFiles[i]);
                     }
                 }
+            }
+
+            // Build the "folders checked" summary string, grouped by sub-project when applicable
+            var foldersMsg;
+            if (!hasMultipleRoots) {
+                // Single root: flat list of date folders
+                var dateFolderList = [];
+                for (var i = 0; i < allSyncedFolders.length; i++) {
+                    dateFolderList.push(allSyncedFolders[i].dateFolder);
+                }
+                foldersMsg = dateFolderList.join(", ");
+            } else {
+                // Multiple roots: group date folders per root label
+                var rootDateMap = {};
+                for (var i = 0; i < allSyncedFolders.length; i++) {
+                    var sf = allSyncedFolders[i];
+                    if (!rootDateMap[sf.rootLabel]) rootDateMap[sf.rootLabel] = [];
+                    rootDateMap[sf.rootLabel].push(sf.dateFolder);
+                }
+                var foldersLines = [];
+                for (var ri = 0; ri < rootLabelsInOrder.length; ri++) {
+                    var lbl = rootLabelsInOrder[ri];
+                    if (rootDateMap[lbl]) {
+                        foldersLines.push("  " + lbl + ": " + rootDateMap[lbl].join(", "));
+                    }
+                }
+                foldersMsg = "\n" + foldersLines.join("\n");
             }
 
             // Compare files
@@ -2489,19 +2533,19 @@
             var syncActions = compareSyncFiles(allLocalFiles, allRemoteFiles);
 
             if (syncActions.toUpload.length === 0 && syncActions.toDownload.length === 0) {
-                alert("Everything is already in sync!\n\nFolders checked: " + allSyncedFolders.join(", "));
+                alert("Everything is already in sync!\n\nFolders checked: " + foldersMsg);
                 progressStatusText.text = "";
                 progressOverallLabel.text = "";
                 return;
             }
 
             // Build confirmation message
-            var confirmMsg = "Folders: " + allSyncedFolders.join(", ") + "\n\n";
+            var confirmMsg = "Folders: " + foldersMsg + "\n\n";
 
             if (syncActions.toUpload.length > 0) {
                 confirmMsg += "FILES TO UPLOAD (" + syncActions.toUpload.length + "):\n";
                 for (var i = 0; i < Math.min(syncActions.toUpload.length, 15); i++) {
-                    confirmMsg += "  + " + syncActions.toUpload[i].relativePath + "\n";
+                    confirmMsg += "  + " + syncActions.toUpload[i].displayPath + "\n";
                 }
                 if (syncActions.toUpload.length > 15) {
                     confirmMsg += "  ... and " + (syncActions.toUpload.length - 15) + " more\n";
@@ -2512,7 +2556,7 @@
             if (syncActions.toDownload.length > 0) {
                 confirmMsg += "FILES TO DOWNLOAD (" + syncActions.toDownload.length + "):\n";
                 for (var i = 0; i < Math.min(syncActions.toDownload.length, 15); i++) {
-                    confirmMsg += "  - " + syncActions.toDownload[i].relativePath + "\n";
+                    confirmMsg += "  - " + syncActions.toDownload[i].displayPath + "\n";
                 }
                 if (syncActions.toDownload.length > 15) {
                     confirmMsg += "  ... and " + (syncActions.toDownload.length - 15) + " more\n";
@@ -2535,14 +2579,14 @@
                 // Update progress at START of each file (show we're working on this file)
                 progressOverallBar.value = (processedFiles / totalFiles) * 100;
                 progressOverallLabel.text = "Uploading " + (processedFiles + 1) + " / " + totalFiles;
-                progressStatusText.text = fileInfo.relativePath;
+                progressStatusText.text = fileInfo.displayPath;
                 panel.layout.layout(true);
 
                 var success = uploadFTPFile(ftpConfig, fileInfo.fullLocalPath, fileInfo.fullRemotePath);
                 processedFiles++;
 
                 if (!success) {
-                    progressStatusText.text = "Error: " + fileInfo.relativePath;
+                    progressStatusText.text = "Error: " + fileInfo.displayPath;
                 }
             }
 
@@ -2553,14 +2597,14 @@
                 // Update progress at START of each file
                 progressOverallBar.value = (processedFiles / totalFiles) * 100;
                 progressOverallLabel.text = "Downloading " + (processedFiles + 1) + " / " + totalFiles;
-                progressStatusText.text = fileInfo.relativePath;
+                progressStatusText.text = fileInfo.displayPath;
                 panel.layout.layout(true);
 
                 var success = downloadFTPFile(ftpConfig, fileInfo.fullRemotePath, fileInfo.fullLocalPath);
                 processedFiles++;
 
                 if (!success) {
-                    progressStatusText.text = "Error: " + fileInfo.relativePath;
+                    progressStatusText.text = "Error: " + fileInfo.displayPath;
                 }
             }
 
