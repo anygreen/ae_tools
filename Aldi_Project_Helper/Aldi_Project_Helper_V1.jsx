@@ -18,7 +18,7 @@
     // ============================================================
 
     var SCRIPT_NAME = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v1.6.1";
+    var SCRIPT_VERSION = "v1.6.2";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     // Fixed path segment for all projects
@@ -1523,6 +1523,10 @@
     renderBtn.alignment = ["fill", "top"];
     renderBtn.helpTip = "Create date/time folders in 03_out and render queue items there";
 
+    var renderAndUploadBtn = mainGroup.add("button", undefined, "Create Folders, Render and Upload");
+    renderAndUploadBtn.alignment = ["fill", "top"];
+    renderAndUploadBtn.helpTip = "Create date/time folders, render queue items, then upload rendered files to FTP";
+
     // ---- Separator ----
     var sep6 = mainGroup.add("panel", undefined, undefined, {borderStyle: "sunken"});
     sep6.alignment = ["fill", "top"];
@@ -1545,6 +1549,18 @@
     ftpCountDropdown.selection = 0;
     ftpCountDropdown.alignment = ["fill", "center"];
     ftpCountDropdown.helpTip = "How many date folders to sync";
+
+    var ftpRestrictGroup = mainGroup.add("group");
+    ftpRestrictGroup.orientation = "row";
+    ftpRestrictGroup.alignment = ["fill", "top"];
+    ftpRestrictGroup.alignChildren = ["left", "center"];
+
+    var ftpRestrictCheckbox = ftpRestrictGroup.add("checkbox", undefined, "Restrict to sub-project");
+    ftpRestrictCheckbox.value = (loadSetting("ftpRestrictToSubProject", "true") === "true");
+    ftpRestrictCheckbox.helpTip = "When enabled and a specific sub-project is selected, only sync that sub-project's folders";
+    ftpRestrictCheckbox.onClick = function() {
+        saveSetting("ftpRestrictToSubProject", this.value ? "true" : "false");
+    };
 
     var syncBtn = mainGroup.add("button", undefined, "Sync");
     syncBtn.alignment = ["fill", "top"];
@@ -2149,174 +2165,282 @@
         }
     };
 
+    /**
+     * Validates the render queue, resolves the output path, creates date/time folders,
+     * and updates all queued output modules to point to the new folder.
+     * @returns {Object|null} Setup result object, or null if cancelled/failed
+     */
+    function setupRenderOutput() {
+        var renderQueue = app.project.renderQueue;
+        var activeItems = [];
+
+        for (var i = 1; i <= renderQueue.numItems; i++) {
+            var item = renderQueue.item(i);
+            if (item.status === RQItemStatus.QUEUED) {
+                activeItems.push(item);
+            }
+        }
+
+        if (activeItems.length === 0) {
+            alert("No active items in the render queue.\n\nPlease add compositions to the render queue and set them to 'Queued' status.");
+            return null;
+        }
+
+        if (!projectDropdown.selection) {
+            alert("Please select a project first to determine the output folder.");
+            return null;
+        }
+
+        var projectIndex = projectDropdown.selection.index;
+        var projectPath = currentProjects[projectIndex].path;
+        var projectName = currentProjects[projectIndex].name;
+
+        var outBasePath = projectPath + "/06_vfx/03_out";
+        var dateFolder = getRenderDateFolder();
+        var timeFolder = getRenderTimeFolder();
+
+        // Determine active sub-project for output path
+        var renderSubProject = null;
+        if (currentSubProjects.length > 0) {
+            if (subProjectDropdown.enabled && subProjectDropdown.selection && subProjectDropdown.selection.index > 0) {
+                renderSubProject = currentSubProjects[subProjectDropdown.selection.index - 1];
+            } else {
+                // "(All)" is selected - try to detect from open project file path
+                if (app.project.file) {
+                    var openFilePath = app.project.file.fsName.replace(/\\/g, "/");
+                    for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                        if (openFilePath.indexOf("/" + currentSubProjects[sp] + "/") !== -1) {
+                            renderSubProject = currentSubProjects[sp];
+                            break;
+                        }
+                    }
+                }
+                // If still not detected, ask the user to pick one
+                if (!renderSubProject) {
+                    var spDialog = new Window("dialog", "Select Sub-project for Output");
+                    spDialog.orientation = "column";
+                    spDialog.alignChildren = ["fill", "top"];
+                    spDialog.spacing = 10;
+                    spDialog.margins = 16;
+
+                    spDialog.add("statictext", undefined, "Sub-projects detected. Select output sub-project:");
+                    var spDropdown = spDialog.add("dropdownlist", undefined, currentSubProjects);
+                    spDropdown.selection = 0;
+
+                    var spBtnGroup = spDialog.add("group");
+                    spBtnGroup.orientation = "row";
+                    spBtnGroup.alignment = ["center", "top"];
+                    spBtnGroup.add("button", undefined, "OK", {name: "ok"});
+                    spBtnGroup.add("button", undefined, "Cancel", {name: "cancel"});
+
+                    if (spDialog.show() !== 1) return null;
+                    renderSubProject = currentSubProjects[spDropdown.selection.index];
+                }
+            }
+        }
+
+        // Build the full output path
+        var outRenderPath = outBasePath;
+        if (renderSubProject) {
+            outRenderPath += "/" + renderSubProject;
+        }
+
+        var dateFolderPath = outRenderPath + "/" + dateFolder;
+        var timeFolderPath = dateFolderPath + "/" + timeFolder;
+
+        // Check if base output folder exists
+        var outBaseFolder = new Folder(outBasePath);
+        if (!outBaseFolder.exists) {
+            alert("Output folder does not exist:\n" + outBasePath + "\n\nPlease create the folder structure first.");
+            return null;
+        }
+
+        // Create sub-project folder if needed
+        if (renderSubProject) {
+            var subProjectFolderObj = new Folder(outRenderPath);
+            if (!subProjectFolderObj.exists) {
+                if (!subProjectFolderObj.create()) {
+                    alert("Failed to create sub-project folder:\n" + outRenderPath);
+                    return null;
+                }
+            }
+        }
+
+        // Create date folder if needed
+        var dateFolderObj = new Folder(dateFolderPath);
+        if (!dateFolderObj.exists) {
+            if (!dateFolderObj.create()) {
+                alert("Failed to create date folder:\n" + dateFolderPath);
+                return null;
+            }
+        }
+
+        // Create time folder if needed
+        var timeFolderObj = new Folder(timeFolderPath);
+        if (!timeFolderObj.exists) {
+            if (!timeFolderObj.create()) {
+                alert("Failed to create time folder:\n" + timeFolderPath);
+                return null;
+            }
+        }
+
+        // Update output paths for all active render items
+        var outputCount = 0;
+        for (var i = 0; i < activeItems.length; i++) {
+            var item = activeItems[i];
+            for (var j = 1; j <= item.numOutputModules; j++) {
+                var outputModule = item.outputModule(j);
+                var currentFile = outputModule.file;
+                if (currentFile) {
+                    var fileName = currentFile.name;
+                    var newFilePath = timeFolderPath + "/" + fileName;
+                    outputModule.file = new File(newFilePath);
+                    outputCount++;
+                }
+            }
+        }
+
+        var simplifiedPath = "/06_vfx/03_out/" +
+            (renderSubProject ? renderSubProject + "/" : "") +
+            dateFolder + "/" + timeFolder;
+
+        return {
+            timeFolderPath: timeFolderPath,
+            simplifiedPath: simplifiedPath,
+            renderSubProject: renderSubProject,
+            dateFolder: dateFolder,
+            timeFolder: timeFolder,
+            activeItems: activeItems,
+            outputCount: outputCount,
+            projectPath: projectPath,
+            projectName: projectName,
+            renderQueue: renderQueue
+        };
+    }
+
     // Render button
     renderBtn.onClick = function() {
         try {
-            // Check if there are active items in the render queue
-            var renderQueue = app.project.renderQueue;
-            var activeItems = [];
+            var setup = setupRenderOutput();
+            if (!setup) return;
 
-            for (var i = 1; i <= renderQueue.numItems; i++) {
-                var item = renderQueue.item(i);
-                if (item.status === RQItemStatus.QUEUED) {
-                    activeItems.push(item);
-                }
-            }
+            var clipboardSuccess = copyToClipboard(setup.simplifiedPath);
 
-            if (activeItems.length === 0) {
-                alert("No active items in the render queue.\n\nPlease add compositions to the render queue and set them to 'Queued' status.");
-                return;
-            }
-
-            // Validate project selection for output path
-            if (!projectDropdown.selection) {
-                alert("Please select a project first to determine the output folder.");
-                return;
-            }
-
-            var projectIndex = projectDropdown.selection.index;
-            var projectPath = currentProjects[projectIndex].path;
-
-            // Build output folder path
-            var outBasePath = projectPath + "/06_vfx/03_out";
-            var dateFolder = getRenderDateFolder();
-            var timeFolder = getRenderTimeFolder();
-
-            // Determine active sub-project for output path
-            var renderSubProject = null;
-            if (currentSubProjects.length > 0) {
-                if (subProjectDropdown.enabled && subProjectDropdown.selection && subProjectDropdown.selection.index > 0) {
-                    // A specific sub-project is selected
-                    renderSubProject = currentSubProjects[subProjectDropdown.selection.index - 1];
-                } else {
-                    // "(All)" is selected - try to detect from open project file path
-                    if (app.project.file) {
-                        var openFilePath = app.project.file.fsName.replace(/\\/g, "/");
-                        for (var sp = 0; sp < currentSubProjects.length; sp++) {
-                            if (openFilePath.indexOf("/" + currentSubProjects[sp] + "/") !== -1) {
-                                renderSubProject = currentSubProjects[sp];
-                                break;
-                            }
-                        }
-                    }
-                    // If still not detected, ask the user to pick one
-                    if (!renderSubProject) {
-                        var spDialog = new Window("dialog", "Select Sub-project for Output");
-                        spDialog.orientation = "column";
-                        spDialog.alignChildren = ["fill", "top"];
-                        spDialog.spacing = 10;
-                        spDialog.margins = 16;
-
-                        spDialog.add("statictext", undefined, "Sub-projects detected. Select output sub-project:");
-                        var spDropdown = spDialog.add("dropdownlist", undefined, currentSubProjects);
-                        spDropdown.selection = 0;
-
-                        var spBtnGroup = spDialog.add("group");
-                        spBtnGroup.orientation = "row";
-                        spBtnGroup.alignment = ["center", "top"];
-                        spBtnGroup.add("button", undefined, "OK", {name: "ok"});
-                        spBtnGroup.add("button", undefined, "Cancel", {name: "cancel"});
-
-                        if (spDialog.show() !== 1) return;
-                        renderSubProject = currentSubProjects[spDropdown.selection.index];
-                    }
-                }
-            }
-
-            // Build the full output path, inserting sub-project if applicable
-            var outRenderPath = outBasePath;
-            if (renderSubProject) {
-                outRenderPath += "/" + renderSubProject;
-            }
-
-            var dateFolderPath = outRenderPath + "/" + dateFolder;
-            var timeFolderPath = dateFolderPath + "/" + timeFolder;
-
-            // Check if base output folder exists
-            var outBaseFolder = new Folder(outBasePath);
-            if (!outBaseFolder.exists) {
-                alert("Output folder does not exist:\n" + outBasePath + "\n\nPlease create the folder structure first.");
-                return;
-            }
-
-            // Create sub-project folder if needed
-            if (renderSubProject) {
-                var subProjectFolderObj = new Folder(outRenderPath);
-                if (!subProjectFolderObj.exists) {
-                    if (!subProjectFolderObj.create()) {
-                        alert("Failed to create sub-project folder:\n" + outRenderPath);
-                        return;
-                    }
-                }
-            }
-
-            // Create date folder if needed
-            var dateFolderObj = new Folder(dateFolderPath);
-            if (!dateFolderObj.exists) {
-                if (!dateFolderObj.create()) {
-                    alert("Failed to create date folder:\n" + dateFolderPath);
-                    return;
-                }
-            }
-
-            // Create time folder if needed
-            var timeFolderObj = new Folder(timeFolderPath);
-            if (!timeFolderObj.exists) {
-                if (!timeFolderObj.create()) {
-                    alert("Failed to create time folder:\n" + timeFolderPath);
-                    return;
-                }
-            }
-
-            // Update output paths for all active render items
-            var outputCount = 0;
-            for (var i = 0; i < activeItems.length; i++) {
-                var item = activeItems[i];
-
-                // Each render item can have multiple output modules
-                for (var j = 1; j <= item.numOutputModules; j++) {
-                    var outputModule = item.outputModule(j);
-                    var currentFile = outputModule.file;
-
-                    if (currentFile) {
-                        // Get just the filename from the current path
-                        var fileName = currentFile.name;
-                        var newFilePath = timeFolderPath + "/" + fileName;
-                        outputModule.file = new File(newFilePath);
-                        outputCount++;
-                    }
-                }
-            }
-
-            // Try to copy simplified path to clipboard (relative from project root)
-            var simplifiedPath = "/06_vfx/03_out/" + (renderSubProject ? renderSubProject + "/" : "") + dateFolder + "/" + timeFolder;
-            var clipboardSuccess = copyToClipboard(simplifiedPath);
-
-            // Show confirmation
             var confirmMsg = "Render Setup Complete\n\n";
-            confirmMsg += "Output folder:\n" + simplifiedPath + "\n\n";
-            confirmMsg += "Active items: " + activeItems.length + "\n";
-            confirmMsg += "Output modules updated: " + outputCount + "\n\n";
-
+            confirmMsg += "Output folder:\n" + setup.simplifiedPath + "\n\n";
+            confirmMsg += "Active items: " + setup.activeItems.length + "\n";
+            confirmMsg += "Output modules updated: " + setup.outputCount + "\n\n";
             if (clipboardSuccess) {
                 confirmMsg += "Path copied to clipboard!\n\n";
             }
-
             confirmMsg += "Start rendering now?";
 
             if (confirm(confirmMsg)) {
-                // Start rendering
-                renderQueue.render();
-
-                // Switch FTP dropdown to Output for easy syncing after render
+                setup.renderQueue.render();
                 ftpLocationDropdown.selection = 1;
             } else if (!clipboardSuccess) {
-                // Show path dialog if clipboard failed and user cancelled render
-                showPathDialog("Output Path", "Copy the output path:", simplifiedPath);
+                showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath);
             }
 
         } catch (error) {
             alert("Error in Render:\n" + error.message + "\nLine: " + error.line);
+        }
+    };
+
+    // Render and Upload button
+    renderAndUploadBtn.onClick = function() {
+        try {
+            var setup = setupRenderOutput();
+            if (!setup) return;
+
+            var ftpConfig = getFTPConnectionForProject(setup.projectName);
+            if (!ftpConfig) {
+                alert("No FTP connection configured for project:\n" + setup.projectName +
+                      "\n\nPlease add a connection in:\n" + FTP_CONFIG_FILE +
+                      "\n\nAborting. Use 'Create Folders and Render' to render without upload.");
+                return;
+            }
+
+            var clipboardSuccess = copyToClipboard(setup.simplifiedPath);
+
+            var confirmMsg = "Create Folders, Render and Upload\n\n";
+            confirmMsg += "Output folder:\n" + setup.simplifiedPath + "\n\n";
+            confirmMsg += "Active items: " + setup.activeItems.length + "\n";
+            confirmMsg += "Output modules updated: " + setup.outputCount + "\n\n";
+            confirmMsg += "FTP: " + ftpConfig.hostname + "\n\n";
+            if (clipboardSuccess) {
+                confirmMsg += "Path copied to clipboard!\n\n";
+            }
+            confirmMsg += "Start rendering and upload to FTP now?";
+
+            if (!confirm(confirmMsg)) {
+                if (!clipboardSuccess) {
+                    showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath);
+                }
+                return;
+            }
+
+            // Render (synchronous - blocks until complete)
+            setup.renderQueue.render();
+            ftpLocationDropdown.selection = 1;
+
+            // Scan the time folder for rendered files
+            progressOverallBar.value = 0;
+            progressOverallLabel.text = "Scanning rendered files...";
+            progressStatusText.text = "";
+            panel.layout.layout(true);
+
+            var timeFolderObj = new Folder(setup.timeFolderPath);
+            var renderedFiles = [];
+            scanFolderForFiles(timeFolderObj, setup.timeFolderPath, renderedFiles);
+
+            if (renderedFiles.length === 0) {
+                alert("Render complete, but no files found in output folder:\n" + setup.timeFolderPath +
+                      "\n\nFTP upload skipped.");
+                progressOverallLabel.text = "";
+                progressStatusText.text = "";
+                return;
+            }
+
+            // Remote path mirrors the simplified local path (strip leading slash)
+            var remoteTimePath = FTP_OUTPUT_PATH +
+                (setup.renderSubProject ? "/" + setup.renderSubProject : "") +
+                "/" + setup.dateFolder + "/" + setup.timeFolder;
+
+            var totalFiles = renderedFiles.length;
+            var uploaded = 0;
+            var errors = 0;
+
+            for (var i = 0; i < renderedFiles.length; i++) {
+                var fileInfo = renderedFiles[i];
+                var remoteFilePath = remoteTimePath + "/" + fileInfo.relativePath;
+
+                progressOverallBar.value = (i / totalFiles) * 100;
+                progressOverallLabel.text = "Uploading " + (i + 1) + " / " + totalFiles;
+                progressStatusText.text = fileInfo.relativePath;
+                panel.layout.layout(true);
+
+                var success = uploadFTPFile(ftpConfig, fileInfo.file.fsName, remoteFilePath);
+                if (success) {
+                    uploaded++;
+                } else {
+                    errors++;
+                }
+            }
+
+            progressOverallBar.value = 100;
+            progressOverallLabel.text = "Complete: " + uploaded + " uploaded";
+            progressStatusText.text = errors > 0 ? errors + " error(s)" : "All files uploaded";
+            panel.layout.layout(true);
+
+            alert("Render and Upload complete!\n\n" +
+                  "Uploaded: " + uploaded + " / " + totalFiles + " files\n" +
+                  (errors > 0 ? "Errors: " + errors + "\n" : "") +
+                  "\nRemote path:\n" + remoteTimePath);
+
+        } catch (error) {
+            alert("Error in Render and Upload:\n" + error.message + "\nLine: " + error.line);
+            progressStatusText.text = "Error: " + error.message;
         }
     };
 
@@ -2379,30 +2503,56 @@
             // Determine how many folders to sync
             var folderCount = ftpCountDropdown.selection.index === 0 ? 1 : 5;
 
+            // Determine if we should restrict to a specific sub-project
+            var restrictSubProject = null;
+            if (ftpRestrictCheckbox.value &&
+                currentSubProjects.length > 0 &&
+                subProjectDropdown.enabled &&
+                subProjectDropdown.selection &&
+                subProjectDropdown.selection.index > 0) {
+                restrictSubProject = currentSubProjects[subProjectDropdown.selection.index - 1];
+            }
+
             // Build scan roots: each root is a location that contains date folders
             var scanRoots = [];
 
             if (isInput) {
-                // Input: always include the base inbox for regular date folders
-                scanRoots.push({localBase: localBasePath, remoteBase: syncPath, label: "inbox"});
-
-                // Add sub-project roots if sub-projects are detected
-                for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                if (restrictSubProject) {
+                    // Restricted: only scan that sub-project's inbox subfolder
                     scanRoots.push({
-                        localBase: localBasePath + "/" + currentSubProjects[sp],
-                        remoteBase: syncPath + "/" + currentSubProjects[sp],
-                        label: currentSubProjects[sp]
+                        localBase: localBasePath + "/" + restrictSubProject,
+                        remoteBase: syncPath + "/" + restrictSubProject,
+                        label: restrictSubProject
                     });
-                }
-            } else {
-                // Output: if sub-projects exist, only scan inside sub-project folders
-                if (currentSubProjects.length > 0) {
+                } else {
+                    // Unrestricted: base inbox + all sub-project subfolders
+                    scanRoots.push({localBase: localBasePath, remoteBase: syncPath, label: "inbox"});
                     for (var sp = 0; sp < currentSubProjects.length; sp++) {
                         scanRoots.push({
                             localBase: localBasePath + "/" + currentSubProjects[sp],
                             remoteBase: syncPath + "/" + currentSubProjects[sp],
                             label: currentSubProjects[sp]
                         });
+                    }
+                }
+            } else {
+                if (currentSubProjects.length > 0) {
+                    if (restrictSubProject) {
+                        // Restricted: only scan that sub-project's output subfolder
+                        scanRoots.push({
+                            localBase: localBasePath + "/" + restrictSubProject,
+                            remoteBase: syncPath + "/" + restrictSubProject,
+                            label: restrictSubProject
+                        });
+                    } else {
+                        // Unrestricted: all sub-project output subfolders
+                        for (var sp = 0; sp < currentSubProjects.length; sp++) {
+                            scanRoots.push({
+                                localBase: localBasePath + "/" + currentSubProjects[sp],
+                                remoteBase: syncPath + "/" + currentSubProjects[sp],
+                                label: currentSubProjects[sp]
+                            });
+                        }
                     }
                 } else {
                     // No sub-projects, single root at 03_out
