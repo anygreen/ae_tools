@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.1
+ * @version 1.0.2
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.1";
+    var SCRIPT_VERSION = "v1.0.2";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -111,7 +111,8 @@
         if (IS_MAC) {
             return system.callSystem("echo $HOME").replace(/[\r\n]+$/, "");
         } else {
-            return system.callSystem("echo %USERPROFILE%").replace(/[\r\n]+$/, "");
+            // Folder("~") resolves reliably on Windows without a shell round-trip
+            return new Folder("~").fsName;
         }
     }
 
@@ -123,8 +124,8 @@
     }
 
     function normaliseFileEntry(entry) {
-        if (typeof entry === "string") { return { repo: entry, local: entry }; }
-        return { repo: entry.repo, local: entry.local };
+        if (typeof entry === "string") { return { repo: entry, local: entry, skipIfExists: false }; }
+        return { repo: entry.repo, local: entry.local, skipIfExists: !!entry.skipIfExists };
     }
 
     function githubApiUrl(repoPath) {
@@ -134,7 +135,7 @@
     }
 
     function curlGet(url, pat) {
-        var cmd = 'curl -s' +
+        var cmd = 'curl -s --connect-timeout 15 --max-time 60' +
                   ' -H "Authorization: token ' + pat + '"' +
                   ' -H "Accept: application/vnd.github.v3.raw"' +
                   ' "' + url + '"';
@@ -147,7 +148,9 @@
 
     function ensureFolderExists(folder) {
         if (folder.exists) return;
-        ensureFolderExists(new Folder(folder.parent.fsName));
+        var parent = new Folder(folder.parent.fsName);
+        if (parent.fsName === folder.fsName) return; // reached filesystem root
+        ensureFolderExists(parent);
         folder.create();
     }
 
@@ -170,6 +173,17 @@
                 system.callSystem('rmdir /s /q "' + fsPath + '"');
             }
         }
+    }
+
+    /**
+     * Deletes fsPath only if it is within the ScriptUI Panels folder,
+     * preventing manifest remove entries from escaping the install root.
+     */
+    function safeDeleteItem(fsPath, panelsFolder) {
+        var normalised = fsPath.replace(/\\/g, "/");
+        var panelBase  = panelsFolder.fsName.replace(/\\/g, "/");
+        if (normalised.indexOf(panelBase) !== 0) { return; }
+        deleteItem(fsPath);
     }
 
     // ============================================================
@@ -233,30 +247,50 @@
     }
 
     function installTool(tool, panelsFolder, pat) {
-        var i;
+        var i, entry, url, content, destFile;
 
-        if (tool.remove) {
-            for (i = 0; i < tool.remove.length; i++) {
-                deleteItem(resolveLocalPath(tool.remove[i], panelsFolder).fsName);
-            }
-        }
-
+        // --- Phase 1: download everything before touching the filesystem ---
+        // This prevents partial installs: if any download fails, nothing is written.
+        var downloads = []; // parallel array to tool.files; null = skip
         for (i = 0; i < tool.files.length; i++) {
-            var entry   = normaliseFileEntry(tool.files[i]);
-            var url     = githubApiUrl(entry.repo);
-            var content = curlGet(url, pat);
+            entry = normaliseFileEntry(tool.files[i]);
+
+            if (entry.skipIfExists) {
+                destFile = resolveLocalPath(entry.local, panelsFolder);
+                if (destFile.exists) {
+                    downloads.push(null); // already present — leave it alone
+                    continue;
+                }
+            }
+
+            url     = githubApiUrl(entry.repo);
+            content = curlGet(url, pat);
 
             if (!content) { throw new Error("Empty response for: " + entry.repo); }
 
+            // Detect GitHub API error objects (have "message" but not "tools")
             if (content.charAt(0) === "{") {
                 var errObj = parseJSON(content);
-                if (errObj && errObj.message) {
+                if (errObj && errObj.message && !errObj.tools) {
                     throw new Error("GitHub: " + errObj.message + " (" + entry.repo + ")");
                 }
             }
 
-            var destFile = resolveLocalPath(entry.local, panelsFolder);
-            writeFile(destFile, content);
+            downloads.push(content);
+        }
+
+        // --- Phase 2: remove old files, then write new ones ---
+        if (tool.remove) {
+            for (i = 0; i < tool.remove.length; i++) {
+                safeDeleteItem(resolveLocalPath(tool.remove[i], panelsFolder).fsName, panelsFolder);
+            }
+        }
+
+        for (i = 0; i < tool.files.length; i++) {
+            if (downloads[i] === null) { continue; } // skipIfExists — already on disk
+            entry    = normaliseFileEntry(tool.files[i]);
+            destFile = resolveLocalPath(entry.local, panelsFolder);
+            writeFile(destFile, downloads[i]);
         }
 
         saveInstalledVersion(tool.id, tool.version);
@@ -437,7 +471,8 @@
                 setStatus("Finished with errors.");
                 alert("Some installs failed:\n\n" + errors.join("\n"));
             } else {
-                setStatus("Done! Restart After Effects to apply.");
+                setStatus("Done \u2014 restart After Effects to apply.");
+                alert("Update complete!\n\nPlease restart After Effects to apply the new scripts.");
             }
 
             checkBtn.enabled = true;
@@ -454,12 +489,17 @@
             }
         };
 
-        // Auto-check on load only if a PAT is already stored
+        // Auto-check if PAT already stored; otherwise prompt immediately on first launch
         if (getStoredPAT()) {
             checkBtn.onClick();
         } else {
-            listBox.add("item", "No access token configured.");
-            setStatus("Click 'Configure access token\u2026' to set up.");
+            var firstRunPAT = showPATDialog();
+            if (firstRunPAT) {
+                checkBtn.onClick();
+            } else {
+                listBox.add("item", "No access token configured.");
+                setStatus("Click 'Configure access token\u2026' to set up.");
+            }
         }
 
         return panel;
