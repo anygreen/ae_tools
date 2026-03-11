@@ -501,7 +501,10 @@
             var errors = [];
             for (i = 0; i < toolsToInstall.length; i++) {
                 var tool = toolsToInstall[i];
-                setStatus("Installing " + tool.name + "\u2026");
+                setStatus("Installing " + tool.name + "\u2026 (this may take a moment)");
+                // Force a repaint so the status text is visible before the
+                // blocking curl calls freeze the UI.
+                try { panel.update(); } catch (e) {}
                 try {
                     installTool(tool, panelsFolder, pat);
                 } catch (e) {
