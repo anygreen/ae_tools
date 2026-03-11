@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.2
+ * @version 1.0.3
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.2";
+    var SCRIPT_VERSION = "v1.0.3";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -230,12 +230,24 @@
         var updates  = [];
         var newTools = [];
         var upToDate = [];
+        var panelsFolder = getScriptsPanelsFolder();
 
         for (var i = 0; i < manifest.tools.length; i++) {
             var tool      = manifest.tools[i];
             var installed = getInstalledVersion(tool.id);
+
             if (installed === null) {
-                newTools.push(tool);
+                // Check whether the tool's primary file already exists on disk
+                // (installed manually before anyUpdater existed). If so, adopt it
+                // silently at the current manifest version instead of marking as new.
+                var firstEntry   = normaliseFileEntry(tool.files[0]);
+                var primaryFile  = resolveLocalPath(firstEntry.local, panelsFolder);
+                if (primaryFile.exists) {
+                    saveInstalledVersion(tool.id, tool.version);
+                    upToDate.push(tool);
+                } else {
+                    newTools.push(tool);
+                }
             } else if (installed !== tool.version) {
                 updates.push({ tool: tool, fromVersion: installed });
             } else {
@@ -315,10 +327,13 @@
         headerGrp.orientation   = "row";
         headerGrp.alignChildren = ["left", "center"];
         headerGrp.alignment     = ["fill", "top"];
+        headerGrp.spacing       = 0;
 
-        headerGrp.add("statictext", undefined, SCRIPT_NAME);
-        var verLabel = headerGrp.add("statictext", undefined, SCRIPT_VERSION);
-        verLabel.alignment = ["right", "center"];
+        var nameLabel = headerGrp.add("statictext", undefined, SCRIPT_NAME);
+        nameLabel.alignment = ["left", "center"];
+
+        var verLabel = headerGrp.add("statictext", undefined, "  " + SCRIPT_VERSION);
+        verLabel.alignment = ["left", "center"];
         try {
             verLabel.graphics.foregroundColor =
                 verLabel.graphics.newPen(verLabel.graphics.PenType.SOLID_COLOR, [0.45, 0.45, 0.45], 1);
@@ -330,8 +345,8 @@
         sep1.maximumSize = [9999, 2];
 
         // Tool list
-        var listBox = panel.add("listbox", [0, 0, 240, 130], []);
-        listBox.alignment = ["fill", "fill"];
+        var listBox = panel.add("listbox", [0, 0, 240, 110], []);
+        listBox.alignment = ["fill", "top"];
 
         // Separator
         var sep2 = panel.add("panel");
