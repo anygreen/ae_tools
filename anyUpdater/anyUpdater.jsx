@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.5
+ * @version 1.0.6
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.5";
+    var SCRIPT_VERSION = "v1.0.6";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -209,7 +209,8 @@
     function getInstalledVersion(toolId) {
         try {
             if (app.settings.haveSetting(SETTINGS_KEY, toolId)) {
-                return app.settings.getSetting(SETTINGS_KEY, toolId);
+                var val = app.settings.getSetting(SETTINGS_KEY, toolId);
+                if (val && val !== "") return val;
             }
         } catch (e) {}
         return null;
@@ -249,21 +250,37 @@
         var panelsFolder = getScriptsPanelsFolder();
 
         for (var i = 0; i < manifest.tools.length; i++) {
-            var tool      = manifest.tools[i];
-            var installed = getInstalledVersion(tool.id);
+            var tool = manifest.tools[i];
+            var installed;
+
+            // anyUpdater always knows its own running version — no need
+            // to rely on the preference which can go stale after a manual
+            // file replacement.
+            if (tool.id === "any_updater") {
+                installed = SCRIPT_VERSION;
+                saveInstalledVersion(tool.id, SCRIPT_VERSION);
+            } else {
+                installed = getInstalledVersion(tool.id);
+            }
+
+            var firstEntry  = normaliseFileEntry(tool.files[0]);
+            var primaryFile = resolveLocalPath(firstEntry.local, panelsFolder);
 
             if (installed === null) {
                 // Check whether the tool's primary file already exists on disk
                 // (installed manually before anyUpdater existed). If so, adopt it
                 // silently at the current manifest version instead of marking as new.
-                var firstEntry   = normaliseFileEntry(tool.files[0]);
-                var primaryFile  = resolveLocalPath(firstEntry.local, panelsFolder);
                 if (primaryFile.exists) {
                     saveInstalledVersion(tool.id, tool.version);
                     upToDate.push(tool);
                 } else {
                     newTools.push(tool);
                 }
+            } else if (!primaryFile.exists && tool.id !== "any_updater") {
+                // Stale preference — the file was removed or never properly
+                // installed.  Clear the preference and treat as new.
+                saveInstalledVersion(tool.id, "");
+                newTools.push(tool);
             } else if (installed !== tool.version) {
                 updates.push({ tool: tool, fromVersion: installed });
             } else {
@@ -343,12 +360,13 @@
         headerGrp.orientation   = "row";
         headerGrp.alignChildren = ["left", "center"];
         headerGrp.alignment     = ["fill", "top"];
-        headerGrp.spacing       = 0;
+        headerGrp.spacing       = 4;
 
         var nameLabel = headerGrp.add("statictext", undefined, SCRIPT_NAME);
         nameLabel.alignment = ["left", "center"];
 
-        var verLabel = headerGrp.add("statictext", undefined, "  " + SCRIPT_VERSION);
+        // Trailing space prevents ScriptUI auto-size from clipping the last character
+        var verLabel = headerGrp.add("statictext", undefined, SCRIPT_VERSION + " ");
         verLabel.alignment = ["left", "center"];
         try {
             verLabel.graphics.foregroundColor =
@@ -518,6 +536,15 @@
                 updateBtn.enabled = false;
                 listBox.removeAll();
             }
+        };
+
+        // Setup Panel Sizing (required for docked ScriptUI Panels)
+        panel.layout.layout(true);
+
+        // Make the panel resizeable
+        panel.layout.resize();
+        panel.onResizing = panel.onResize = function() {
+            this.layout.resize();
         };
 
         // Auto-check if PAT already stored; otherwise prompt immediately on first launch
