@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.3
+ * @version 1.0.4
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.3";
+    var SCRIPT_VERSION = "v1.0.4";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -160,6 +160,15 @@
         if (!file.open("w")) { throw new Error("Cannot write to: " + file.fsName); }
         file.write(content);
         file.close();
+
+        // Delete the companion .jsc bytecode cache if present.
+        // AE compiles .jsx panels to .jsc on first load; if the .jsc exists it
+        // takes priority over the .jsx, so the old version would keep loading
+        // even after the .jsx is updated.
+        if (file.fsName.slice(-4).toLowerCase() === ".jsx") {
+            var jsc = new File(file.fsName.slice(0, -4) + ".jsc");
+            if (jsc.exists) { jsc.remove(); }
+        }
     }
 
     function deleteItem(fsPath) {
