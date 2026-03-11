@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.4
+ * @version 1.0.5
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.4";
+    var SCRIPT_VERSION = "v1.0.5";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -100,11 +100,18 @@
 
     /**
      * Returns the ScriptUI Panels folder this script lives in.
-     * Path: .../Scripts/ScriptUI Panels/anyUpdater/anyUpdater.jsx
+     * Handles both install layouts:
+     *   flat:      .../ScriptUI Panels/anyUpdater.jsx  (via "Install ScriptUI Panel")
+     *   subfolder: .../ScriptUI Panels/anyUpdater/anyUpdater.jsx
      */
     function getScriptsPanelsFolder() {
         var thisFile = new File($.fileName);
-        return thisFile.parent.parent;
+        var parent   = thisFile.parent;
+        // If running from a named subfolder, go up one extra level
+        if (parent.name === SCRIPT_NAME) {
+            return parent.parent;
+        }
+        return parent;
     }
 
     function getHomeFolder() {

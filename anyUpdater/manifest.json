@@ -37,11 +37,13 @@
     {
       "id": "any_updater",
       "name": "anyUpdater",
-      "version": "1.0.4",
+      "version": "1.0.5",
       "files": [
-        "anyUpdater/anyUpdater.jsx"
+        { "repo": "anyUpdater/anyUpdater.jsx", "local": "anyUpdater.jsx" }
       ],
-      "remove": []
+      "remove": [
+        "anyUpdater/anyUpdater.jsx"
+      ]
     }
   ]
 }
