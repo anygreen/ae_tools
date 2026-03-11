@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.6
+ * @version 1.0.7
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.6";
+    var SCRIPT_VERSION = "v1.0.7";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -255,10 +255,11 @@
 
             // anyUpdater always knows its own running version — no need
             // to rely on the preference which can go stale after a manual
-            // file replacement.
+            // file replacement.  Strip the leading "v" so it matches the
+            // manifest format (e.g. "1.0.6", not "v1.0.6").
             if (tool.id === "any_updater") {
-                installed = SCRIPT_VERSION;
-                saveInstalledVersion(tool.id, SCRIPT_VERSION);
+                installed = SCRIPT_VERSION.replace(/^v/, "");
+                saveInstalledVersion(tool.id, installed);
             } else {
                 installed = getInstalledVersion(tool.id);
             }
@@ -267,22 +268,24 @@
             var primaryFile = resolveLocalPath(firstEntry.local, panelsFolder);
 
             if (installed === null) {
-                // Check whether the tool's primary file already exists on disk
-                // (installed manually before anyUpdater existed). If so, adopt it
-                // silently at the current manifest version instead of marking as new.
+                // No preference yet — check whether the primary file exists on
+                // disk (manually installed before anyUpdater existed). If so,
+                // adopt silently at the manifest version; otherwise mark as new.
                 if (primaryFile.exists) {
                     saveInstalledVersion(tool.id, tool.version);
                     upToDate.push(tool);
                 } else {
                     newTools.push(tool);
                 }
+            } else if (installed !== tool.version) {
+                // Version mismatch — show as update regardless of file state.
+                // (Primary file may be absent because it changed name in V2, etc.)
+                updates.push({ tool: tool, fromVersion: installed });
             } else if (!primaryFile.exists && tool.id !== "any_updater") {
-                // Stale preference — the file was removed or never properly
-                // installed.  Clear the preference and treat as new.
+                // Pref says up-to-date but primary file is missing — stale pref.
+                // Reset and treat as new so the user can reinstall.
                 saveInstalledVersion(tool.id, "");
                 newTools.push(tool);
-            } else if (installed !== tool.version) {
-                updates.push({ tool: tool, fromVersion: installed });
             } else {
                 upToDate.push(tool);
             }
