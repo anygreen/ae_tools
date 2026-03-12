@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.8
+ * @version 1.0.9
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.8";
+    var SCRIPT_VERSION = "v1.0.9";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -184,11 +184,30 @@
 
     function curlGet(url, pat) {
         log("curlGet: START " + url);
-        var cmd = 'curl -s --connect-timeout 15 --max-time 60' +
+
+        // Write to a temp file instead of capturing stdout.
+        // system.callSystem() has a small output buffer (~32 KB); large files
+        // cause curl to block forever waiting for the buffer to drain.
+        var tmpPath = (IS_MAC ? "/tmp" : system.callSystem("echo %TEMP%").replace(/[\r\n]+$/, "")) +
+                      "/anyUpdater_dl.tmp";
+        var cmd = 'curl -s --connect-timeout 15 --max-time 120' +
                   ' -H "Authorization: token ' + pat + '"' +
                   ' -H "Accept: application/vnd.github.v3.raw"' +
+                  ' -o "' + tmpPath + '"' +
                   ' "' + url + '"';
-        var result = system.callSystem(cmd);
+        system.callSystem(cmd);
+
+        var tmpFile = new File(tmpPath);
+        if (!tmpFile.exists) {
+            log("curlGet: ERROR temp file not created: " + tmpPath);
+            return null;
+        }
+        tmpFile.encoding = "UTF-8";
+        tmpFile.open("r");
+        var result = tmpFile.read();
+        tmpFile.close();
+        tmpFile.remove();
+
         var preview = result ? result.substring(0, 120).replace(/\n/g, "\\n") : "(empty)";
         log("curlGet: DONE  length=" + (result ? result.length : 0) + "  preview=" + preview);
         return result;
