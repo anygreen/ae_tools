@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.9
+ * @version 1.1.0
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.9";
+    var SCRIPT_VERSION = "v1.1.0";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -36,10 +36,7 @@
 
     function initLog() {
         try {
-            var home = IS_MAC
-                ? system.callSystem("echo $HOME").replace(/[\r\n]+$/, "")
-                : new Folder("~").fsName;
-            LOG_FILE = new File(home + "/Documents/anyUpdater_log.txt");
+            LOG_FILE = new File(new Folder("~").fsName + "/Documents/anyUpdater_log.txt");
             LOG_FILE.encoding = "UTF-8";
             LOG_FILE.open("a");
             var d = new Date();
@@ -156,12 +153,30 @@
     }
 
     function getHomeFolder() {
-        if (IS_MAC) {
-            return system.callSystem("echo $HOME").replace(/[\r\n]+$/, "");
-        } else {
-            // Folder("~") resolves reliably on Windows without a shell round-trip
-            return new Folder("~").fsName;
-        }
+        return new Folder("~").fsName;
+    }
+
+    /**
+     * Windows only: runs cmd inside a hidden .bat via a VBScript launcher so
+     * no cmd.exe window flashes in front of After Effects.
+     */
+    function runHidden(cmd) {
+        var tmpDir  = Folder.temp.fsName;
+        var batPath = tmpDir + "\\anyUpdater_run.bat";
+        var vbsPath = tmpDir + "\\anyUpdater_run.vbs";
+        var bat = new File(batPath);
+        bat.open("w");
+        bat.writeln("@echo off");
+        bat.writeln(cmd);
+        bat.close();
+        var vbs = new File(vbsPath);
+        vbs.open("w");
+        vbs.writeln('Set sh = CreateObject("WScript.Shell")');
+        vbs.writeln('sh.Run """' + batPath + '""", 0, True');
+        vbs.close();
+        system.callSystem('wscript //B "' + vbsPath + '"');
+        try { new File(batPath).remove(); } catch (e) {}
+        try { new File(vbsPath).remove(); } catch (e) {}
     }
 
     function resolveLocalPath(localPath, panelsFolder) {
@@ -188,14 +203,15 @@
         // Write to a temp file instead of capturing stdout.
         // system.callSystem() has a small output buffer (~32 KB); large files
         // cause curl to block forever waiting for the buffer to drain.
-        var tmpPath = (IS_MAC ? "/tmp" : system.callSystem("echo %TEMP%").replace(/[\r\n]+$/, "")) +
-                      "/anyUpdater_dl.tmp";
+        var tmpPath = IS_MAC
+            ? "/tmp/anyUpdater_dl.tmp"
+            : Folder.temp.fsName + "\\anyUpdater_dl.tmp";
         var cmd = 'curl -s --connect-timeout 15 --max-time 120' +
                   ' -H "Authorization: token ' + pat + '"' +
                   ' -H "Accept: application/vnd.github.v3.raw"' +
                   ' -o "' + tmpPath + '"' +
                   ' "' + url + '"';
-        system.callSystem(cmd);
+        if (IS_MAC) { system.callSystem(cmd); } else { runHidden(cmd); }
 
         var tmpFile = new File(tmpPath);
         if (!tmpFile.exists) {
@@ -252,7 +268,7 @@
             if (IS_MAC) {
                 system.callSystem('rm -rf "' + fsPath + '"');
             } else {
-                system.callSystem('rmdir /s /q "' + fsPath + '"');
+                runHidden('rmdir /s /q "' + fsPath + '"');
             }
         }
     }
