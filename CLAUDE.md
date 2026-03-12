@@ -92,6 +92,58 @@ try {
 }
 ```
 
+## anyUpdater — Auto-update System
+
+`anyUpdater/anyUpdater.jsx` is a ScriptUI panel that checks `anyUpdater/manifest.json` against AE preferences to detect outdated or missing tools and installs them from the private GitHub repo.
+
+### manifest.json structure
+
+Each entry in `manifest.json` maps a tool id to its current version, the files to download, and old files to remove:
+
+```json
+{
+  "id": "tool_id",
+  "name": "Display Name",
+  "version": "1.2.3",
+  "files": [
+    { "repo": "Dir/File.jsx", "local": "File.jsx" },
+    { "repo": "Dir/config.txt", "local": "~/Documents/config.txt", "skipIfExists": true }
+  ],
+  "remove": ["OldName.jsx"]
+}
+```
+
+- `repo` — path relative to the repo root
+- `local` — flat filename inside "ScriptUI Panels" (or `~/Documents/...` for config files)
+- `skipIfExists: true` — only write if the file is not already on disk (used for user config files)
+- `remove` — flat filenames to delete before installing the new version
+
+**IMPORTANT: `local` paths must be flat** (i.e. just `File.jsx`, not `Dir/File.jsx`) for After Effects to pick up ScriptUI panels from the Window menu. Exception: helper files like `_ftp.jsx` that are `//@include`d can go in a subfolder.
+
+### Version tracking rules
+
+Whenever you modify **any script that is listed in `manifest.json`**:
+
+1. **Increment `SCRIPT_VERSION`** in that script's source (e.g. `"v2.0.1"` → `"v2.0.2"`).
+2. **Update the `version` field** for that tool in `manifest.json` to match (without the `v` prefix, e.g. `"2.0.2"`).
+3. Commit and push both files together.
+
+anyUpdater compares the manifest version against the version stored in AE preferences. If they differ, it shows the tool as needing an update. anyUpdater tracks its own version from `SCRIPT_VERSION` at runtime (not from prefs) so it always reflects the running file.
+
+### SCRIPT_VERSION convention
+
+All scripts tracked by anyUpdater must declare a `SCRIPT_VERSION` variable near the top:
+
+```jsx
+var SCRIPT_VERSION = "v2.0.2";  // must match manifest.json version (with "v" prefix)
+```
+
+Tracked scripts and their current manifest versions:
+- `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.1`
+- `Aldi_Helper/Aldi_Helper_V2.jsx` — `v2.0.2`
+- `anyKV/anyKV.jsx` — `v0.2`
+- `anyUpdater/anyUpdater.jsx` — `v1.1.0`
+
 ## Development Workflow
 
 1. **Creating a new tool**:
@@ -101,9 +153,8 @@ try {
    - Add error handling and undo groups
 
 2. **Version increments**:
-   - Create new file for each version (e.g., `_v0.2.jsx`, `_v0.3.jsx`)
-   - Update `scriptVersion` variable in script header
-   - Keep old versions for reference/rollback
+   - Update `SCRIPT_VERSION` variable in the script (in-place, no new file needed for tools managed by anyUpdater)
+   - Update the matching `version` field in `manifest.json`
 
 3. **Testing**:
    - Scripts must be tested directly in After Effects

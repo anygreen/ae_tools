@@ -1,4 +1,6 @@
 {
+var SCRIPT_VERSION = "v0.2";
+
 function myScript(thisObj){
   function myScript_buildUI(thisObject){
     var myPanel = (thisObj instanceof Panel) ? thisObj : new Window("palette","My Window Name", undefined, {resizeable:true});
