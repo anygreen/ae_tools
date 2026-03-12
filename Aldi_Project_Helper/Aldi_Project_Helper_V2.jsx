@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.0.0";
+    var SCRIPT_VERSION = "v2.0.1";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -356,7 +356,7 @@
     // HELPER FUNCTIONS - FTP Operations (from _ftp.jsx)
     // ============================================================
 
-    //@include "_ftp.jsx"
+    //@include "Aldi_Project_Helper/_ftp.jsx"
 
     // ============================================================
     // HELPER FUNCTIONS - Name Processing

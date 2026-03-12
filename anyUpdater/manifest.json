@@ -4,14 +4,16 @@
     {
       "id": "aldi_project_helper",
       "name": "Aldi Project Helper",
-      "version": "2.0.0",
+      "version": "2.0.1",
       "files": [
-        "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx",
-        "Aldi_Project_Helper/_ftp.jsx",
-        { "repo": "Aldi_Project_Helper/AldiProjectHelper_FTP.txt", "local": "~/Documents/AldiProjectHelper_FTP.txt", "skipIfExists": true }
+        { "repo": "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx", "local": "Aldi_Project_Helper_V2.jsx" },
+        { "repo": "Aldi_Project_Helper/_ftp.jsx",                   "local": "Aldi_Project_Helper/_ftp.jsx" },
+        { "repo": "Aldi_Project_Helper/AldiProjectHelper_FTP.txt",  "local": "~/Documents/AldiProjectHelper_FTP.txt", "skipIfExists": true }
       ],
       "remove": [
-        "Aldi_Project_Helper/Aldi_Project_Helper_V1.jsx"
+        "Aldi_Project_Helper_V1.jsx",
+        "Aldi_Project_Helper/Aldi_Project_Helper_V1.jsx",
+        "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx"
       ]
     },
     {
@@ -19,10 +21,12 @@
       "name": "Aldi Helper",
       "version": "2.0.2",
       "files": [
-        "Aldi_Helper/Aldi_Helper_V2.jsx"
+        { "repo": "Aldi_Helper/Aldi_Helper_V2.jsx", "local": "Aldi_Helper_V2.jsx" }
       ],
       "remove": [
-        "Aldi_Helper/Aldi_Helper_V1.jsx"
+        "Aldi_Helper_V1.jsx",
+        "Aldi_Helper/Aldi_Helper_V1.jsx",
+        "Aldi_Helper/Aldi_Helper_V2.jsx"
       ]
     },
     {
@@ -30,9 +34,11 @@
       "name": "anyKV",
       "version": "0.2",
       "files": [
-        "anyKV/anyKV.jsx"
+        { "repo": "anyKV/anyKV.jsx", "local": "anyKV.jsx" }
       ],
-      "remove": []
+      "remove": [
+        "anyKV/anyKV.jsx"
+      ]
     },
     {
       "id": "any_updater",
