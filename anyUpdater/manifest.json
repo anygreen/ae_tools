@@ -32,7 +32,7 @@
     {
       "id": "any_kv",
       "name": "anyKV",
-      "version": "0.2",
+      "version": "1.0.0",
       "files": [
         { "repo": "anyKV/anyKV.jsx", "local": "anyKV.jsx" }
       ],
