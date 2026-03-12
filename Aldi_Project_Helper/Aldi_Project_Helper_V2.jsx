@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.0.0
+ * @version 2.0.1
  * @author Lennert
  */
 (function createUI(thisObj) {
