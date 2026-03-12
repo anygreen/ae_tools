@@ -37,7 +37,7 @@
     {
       "id": "any_updater",
       "name": "anyUpdater",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "files": [
         { "repo": "anyUpdater/anyUpdater.jsx", "local": "anyUpdater.jsx" }
       ],

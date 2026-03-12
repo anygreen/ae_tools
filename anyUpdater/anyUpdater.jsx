@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.0.7
+ * @version 1.0.8
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.0.7";
+    var SCRIPT_VERSION = "v1.0.8";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -27,6 +27,45 @@
     var MANIFEST_PATH = "anyUpdater/manifest.json";
 
     var IS_MAC = ($.os.indexOf("Mac") !== -1);
+
+    // ============================================================
+    // LOGGING  (~/Documents/anyUpdater_log.txt, appended each run)
+    // ============================================================
+
+    var LOG_FILE = null;
+
+    function initLog() {
+        try {
+            var home = IS_MAC
+                ? system.callSystem("echo $HOME").replace(/[\r\n]+$/, "")
+                : new Folder("~").fsName;
+            LOG_FILE = new File(home + "/Documents/anyUpdater_log.txt");
+            LOG_FILE.encoding = "UTF-8";
+            LOG_FILE.open("a");
+            var d = new Date();
+            LOG_FILE.writeln("\n========== anyUpdater " + SCRIPT_VERSION +
+                             " — " + d.toString() + " ==========");
+            LOG_FILE.close();
+        } catch (e) { LOG_FILE = null; }
+    }
+
+    function log(msg) {
+        if (!LOG_FILE) return;
+        try {
+            var d = new Date();
+            var ts = d.getHours() + ":" +
+                     (d.getMinutes()  < 10 ? "0" : "") + d.getMinutes()  + ":" +
+                     (d.getSeconds()  < 10 ? "0" : "") + d.getSeconds()  + "." +
+                     (d.getMilliseconds() < 100 ? (d.getMilliseconds() < 10 ? "00" : "0") : "") + d.getMilliseconds();
+            LOG_FILE.encoding = "UTF-8";
+            LOG_FILE.open("a");
+            LOG_FILE.writeln("[" + ts + "] " + msg);
+            LOG_FILE.close();
+        } catch (e) {}
+    }
+
+    initLog();
+    log("Script loaded. $.fileName = " + $.fileName);
 
     // ============================================================
     // PAT MANAGEMENT  (stored in AE preferences, never on disk)
@@ -109,8 +148,10 @@
         var parent   = thisFile.parent;
         // If running from a named subfolder, go up one extra level
         if (parent.name === SCRIPT_NAME) {
+            log("getScriptsPanelsFolder: in subfolder, going up. folder = " + parent.parent.fsName);
             return parent.parent;
         }
+        log("getScriptsPanelsFolder: flat install. folder = " + parent.fsName);
         return parent;
     }
 
@@ -142,11 +183,15 @@
     }
 
     function curlGet(url, pat) {
+        log("curlGet: START " + url);
         var cmd = 'curl -s --connect-timeout 15 --max-time 60' +
                   ' -H "Authorization: token ' + pat + '"' +
                   ' -H "Accept: application/vnd.github.v3.raw"' +
                   ' "' + url + '"';
-        return system.callSystem(cmd);
+        var result = system.callSystem(cmd);
+        var preview = result ? result.substring(0, 120).replace(/\n/g, "\\n") : "(empty)";
+        log("curlGet: DONE  length=" + (result ? result.length : 0) + "  preview=" + preview);
+        return result;
     }
 
     function parseJSON(str) {
@@ -162,11 +207,13 @@
     }
 
     function writeFile(file, content) {
+        log("writeFile: writing " + content.length + " bytes to " + file.fsName);
         ensureFolderExists(new Folder(file.parent.fsName));
         file.encoding = "UTF-8";
         if (!file.open("w")) { throw new Error("Cannot write to: " + file.fsName); }
         file.write(content);
         file.close();
+        log("writeFile: done " + file.fsName);
 
         // Delete the companion .jsc bytecode cache if present.
         // AE compiles .jsx panels to .jsc on first load; if the .jsc exists it
@@ -225,21 +272,26 @@
     // ============================================================
 
     function fetchManifest(pat) {
+        log("fetchManifest: fetching " + MANIFEST_PATH);
         var raw = curlGet(githubApiUrl(MANIFEST_PATH), pat);
 
         if (!raw || raw === "") {
+            log("fetchManifest: ERROR empty response");
             return { success: false, error: "No response from server. Check your connection." };
         }
         if (raw.charAt(0) === "{") {
             var obj = parseJSON(raw);
             if (obj && obj.message) {
+                log("fetchManifest: ERROR GitHub message: " + obj.message);
                 return { success: false, error: "GitHub: " + obj.message };
             }
         }
         var manifest = parseJSON(raw);
         if (!manifest || !manifest.tools) {
+            log("fetchManifest: ERROR could not parse manifest. raw=" + raw.substring(0, 200));
             return { success: false, error: "Could not parse manifest." };
         }
+        log("fetchManifest: OK — " + manifest.tools.length + " tool(s) in manifest");
         return { success: true, manifest: manifest };
     }
 
@@ -267,26 +319,37 @@
             var firstEntry  = normaliseFileEntry(tool.files[0]);
             var primaryFile = resolveLocalPath(firstEntry.local, panelsFolder);
 
+            log("getComparison: tool=" + tool.id +
+                "  installed=" + (installed === null ? "null" : installed) +
+                "  manifest=" + tool.version +
+                "  primaryFile=" + primaryFile.fsName +
+                "  exists=" + primaryFile.exists);
+
             if (installed === null) {
                 // No preference yet — check whether the primary file exists on
                 // disk (manually installed before anyUpdater existed). If so,
                 // adopt silently at the manifest version; otherwise mark as new.
                 if (primaryFile.exists) {
+                    log("getComparison: auto-adopting " + tool.id + " at v" + tool.version);
                     saveInstalledVersion(tool.id, tool.version);
                     upToDate.push(tool);
                 } else {
+                    log("getComparison: " + tool.id + " → NEW");
                     newTools.push(tool);
                 }
             } else if (installed !== tool.version) {
                 // Version mismatch — show as update regardless of file state.
                 // (Primary file may be absent because it changed name in V2, etc.)
+                log("getComparison: " + tool.id + " → UPDATE " + installed + " -> " + tool.version);
                 updates.push({ tool: tool, fromVersion: installed });
             } else if (!primaryFile.exists && tool.id !== "any_updater") {
                 // Pref says up-to-date but primary file is missing — stale pref.
                 // Reset and treat as new so the user can reinstall.
+                log("getComparison: " + tool.id + " → STALE PREF (file missing), treating as new");
                 saveInstalledVersion(tool.id, "");
                 newTools.push(tool);
             } else {
+                log("getComparison: " + tool.id + " → UP TO DATE");
                 upToDate.push(tool);
             }
         }
@@ -297,51 +360,74 @@
     function installTool(tool, panelsFolder, pat) {
         var i, entry, url, content, destFile;
 
+        log("installTool: START " + tool.name + " v" + tool.version +
+            " (" + tool.files.length + " file(s))");
+
         // --- Phase 1: download everything before touching the filesystem ---
         // This prevents partial installs: if any download fails, nothing is written.
         var downloads = []; // parallel array to tool.files; null = skip
         for (i = 0; i < tool.files.length; i++) {
             entry = normaliseFileEntry(tool.files[i]);
 
+            log("installTool: file[" + i + "] repo=" + entry.repo +
+                "  local=" + entry.local + "  skipIfExists=" + entry.skipIfExists);
+
             if (entry.skipIfExists) {
                 destFile = resolveLocalPath(entry.local, panelsFolder);
+                log("installTool: skipIfExists check — exists=" + destFile.exists +
+                    "  path=" + destFile.fsName);
                 if (destFile.exists) {
+                    log("installTool: skipping (already on disk)");
                     downloads.push(null); // already present — leave it alone
                     continue;
                 }
             }
 
-            url     = githubApiUrl(entry.repo);
+            url = githubApiUrl(entry.repo);
+            log("installTool: downloading file[" + i + "] from " + url);
             content = curlGet(url, pat);
 
-            if (!content) { throw new Error("Empty response for: " + entry.repo); }
+            if (!content) {
+                log("installTool: ERROR empty response for " + entry.repo);
+                throw new Error("Empty response for: " + entry.repo);
+            }
 
             // Detect GitHub API error objects (have "message" but not "tools")
             if (content.charAt(0) === "{") {
                 var errObj = parseJSON(content);
                 if (errObj && errObj.message && !errObj.tools) {
+                    log("installTool: ERROR GitHub API: " + errObj.message + " (" + entry.repo + ")");
                     throw new Error("GitHub: " + errObj.message + " (" + entry.repo + ")");
                 }
             }
 
+            log("installTool: file[" + i + "] downloaded OK (" + content.length + " bytes)");
             downloads.push(content);
         }
+
+        log("installTool: all downloads complete, writing files");
 
         // --- Phase 2: remove old files, then write new ones ---
         if (tool.remove) {
             for (i = 0; i < tool.remove.length; i++) {
-                safeDeleteItem(resolveLocalPath(tool.remove[i], panelsFolder).fsName, panelsFolder);
+                var removePath = resolveLocalPath(tool.remove[i], panelsFolder).fsName;
+                log("installTool: removing " + removePath);
+                safeDeleteItem(removePath, panelsFolder);
             }
         }
 
         for (i = 0; i < tool.files.length; i++) {
-            if (downloads[i] === null) { continue; } // skipIfExists — already on disk
+            if (downloads[i] === null) {
+                log("installTool: skipping write for file[" + i + "] (skipIfExists)");
+                continue;
+            }
             entry    = normaliseFileEntry(tool.files[i]);
             destFile = resolveLocalPath(entry.local, panelsFolder);
             writeFile(destFile, downloads[i]);
         }
 
         saveInstalledVersion(tool.id, tool.version);
+        log("installTool: DONE " + tool.name + " — version pref saved as " + tool.version);
     }
 
     // ============================================================
@@ -498,19 +584,26 @@
             checkBtn.enabled  = false;
             updateBtn.enabled = false;
 
+            log("updateBtn: installing " + toolsToInstall.length + " tool(s): " +
+                (function() { var n = []; for (var j = 0; j < toolsToInstall.length; j++) n.push(toolsToInstall[j].name); return n.join(", "); })());
+
             var errors = [];
             for (i = 0; i < toolsToInstall.length; i++) {
                 var tool = toolsToInstall[i];
+                log("updateBtn: starting install of " + tool.name);
                 setStatus("Installing " + tool.name + "\u2026 (this may take a moment)");
                 // Force a repaint so the status text is visible before the
                 // blocking curl calls freeze the UI.
                 try { panel.update(); } catch (e) {}
                 try {
                     installTool(tool, panelsFolder, pat);
+                    log("updateBtn: install SUCCESS " + tool.name);
                 } catch (e) {
+                    log("updateBtn: install ERROR " + tool.name + " — " + e.message);
                     errors.push(tool.name + ": " + e.message);
                 }
             }
+            log("updateBtn: all installs done. errors=" + errors.length);
 
             // Refresh list after all installs
             try {
