@@ -1,5 +1,5 @@
 {
-var SCRIPT_VERSION = "v1.0.1";
+var SCRIPT_VERSION = "v1.0.2";
 
 function myScript(thisObj) {
     function myScript_buildUI(thisObject) {
@@ -7,6 +7,8 @@ function myScript(thisObj) {
 
         var PREF_SECTION    = "anyKV";
         var DEFAULT_PRESET  = "50/50";
+        var hasCustomItem   = false;
+        var isSyncing       = false;
 
         // ─── Preferences helpers ───────────────────────────────────────────
         function loadPref(key, fallback) {
@@ -119,7 +121,7 @@ function myScript(thisObj) {
         for (var ci = 0; ci < customPresets.length; ci++) {
             presetDrop.add("item", customPresets[ci]);
         }
-        presetDrop.selection = 0;
+        syncDropdown();
 
         // ─── UI helpers ────────────────────────────────────────────────────
         function setConsole(text, delay) {
@@ -131,6 +133,32 @@ function myScript(thisObj) {
 
         function effectiveOut() {
             return (outField.text === "") ? inField.text : outField.text;
+        }
+
+        function currentLabel() {
+            return inField.text + "/" + effectiveOut();
+        }
+
+        function syncDropdown() {
+            if (isSyncing) return;
+            isSyncing = true;
+            if (hasCustomItem) {
+                presetDrop.remove(presetDrop.items.length - 1);
+                hasCustomItem = false;
+            }
+            var label = currentLabel();
+            var matchIdx = -1;
+            for (var i = 0; i < presetDrop.items.length; i++) {
+                if (presetDrop.items[i].text === label) { matchIdx = i; break; }
+            }
+            if (matchIdx >= 0) {
+                presetDrop.selection = matchIdx;
+            } else {
+                presetDrop.add("item", "Custom");
+                hasCustomItem = true;
+                presetDrop.selection = presetDrop.items.length - 1;
+            }
+            isSyncing = false;
         }
 
         // ─── AE helpers ────────────────────────────────────────────────────
@@ -205,13 +233,19 @@ function myScript(thisObj) {
 
         // ─── Event handlers ────────────────────────────────────────────────
         presetDrop.onChange = function() {
+            if (isSyncing) return;
             if (!presetDrop.selection) return;
+            if (presetDrop.selection.text === "Custom") return;
             var parts = presetDrop.selection.text.split("/");
             if (parts.length === 2) {
                 inField.text  = parts[0];
                 outField.text = (parts[0] === parts[1]) ? "" : parts[1];
                 savePref("lastIn", inField.text);
                 savePref("lastOut", outField.text);
+                if (hasCustomItem) {
+                    presetDrop.remove(presetDrop.items.length - 1);
+                    hasCustomItem = false;
+                }
             }
         };
 
@@ -223,6 +257,10 @@ function myScript(thisObj) {
             for (var i = 0; i < customPresets.length; i++) {
                 if (customPresets[i] === label) { setConsole("Already exists as preset."); return; }
             }
+            if (hasCustomItem) {
+                presetDrop.remove(presetDrop.items.length - 1);
+                hasCustomItem = false;
+            }
             customPresets.push(label);
             presetDrop.add("item", label);
             presetDrop.selection = presetDrop.items.length - 1;
@@ -232,13 +270,14 @@ function myScript(thisObj) {
 
         delPresetBtn.onClick = function() {
             if (!presetDrop.selection) return;
+            if (presetDrop.selection.text === "Custom") { setConsole("Nothing to remove."); return; }
             var idx = presetDrop.selection.index;
             if (idx === 0) { setConsole("Cannot remove 50/50."); return; }
             var removed = presetDrop.selection.text;
             presetDrop.remove(idx);
             customPresets.splice(idx - 1, 1);
-            presetDrop.selection = Math.max(0, idx - 1);
             saveCustomPresets(customPresets);
+            syncDropdown();
             setConsole("Removed: " + removed, 500);
         };
 
@@ -250,6 +289,7 @@ function myScript(thisObj) {
             outField.text = inVal;
             savePref("lastIn", outVal);
             savePref("lastOut", inVal);
+            syncDropdown();
         };
 
         applyBtn.onClick = function() {
@@ -270,7 +310,14 @@ function myScript(thisObj) {
             outField.text = (easing[0] === easing[1]) ? "" : easing[1];
             savePref("lastIn", inField.text);
             savePref("lastOut", outField.text);
+            syncDropdown();
             setConsole("Easing copied...");
+        };
+
+        inField.onChange = outField.onChange = function() {
+            savePref("lastIn", inField.text);
+            savePref("lastOut", outField.text);
+            syncDropdown();
         };
 
         myPanel.addEventListener("keydown", function(e) {

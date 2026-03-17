@@ -141,7 +141,7 @@ var SCRIPT_VERSION = "v2.0.2";  // must match manifest.json version (with "v" pr
 Tracked scripts and their current manifest versions:
 - `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.1`
 - `Aldi_Helper/Aldi_Helper_V2.jsx` — `v2.0.2`
-- `anyKV/anyKV.jsx` — `v1.0.1`
+- `anyKV/anyKV.jsx` — `v1.0.2`
 - `anyUpdater/anyUpdater.jsx` — `v1.1.0`
 
 ## Development Workflow
