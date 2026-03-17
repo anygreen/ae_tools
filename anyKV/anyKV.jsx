@@ -1,5 +1,5 @@
 {
-var SCRIPT_VERSION = "v1.0.0";
+var SCRIPT_VERSION = "v1.0.1";
 
 function myScript(thisObj) {
     function myScript_buildUI(thisObject) {
@@ -18,7 +18,8 @@ function myScript(thisObj) {
 
         function savePref(key, value) {
             try {
-                app.preferences.savePrefAs(PREF_SECTION, key, value, PREFType.PREF_Type_MACHINE_SPECIFIC);
+                app.preferences.savePrefAsString(PREF_SECTION, key, String(value), PREFType.PREF_Type_MACHINE_SPECIFIC);
+                app.preferences.saveToDisk();
             } catch (e) {}
         }
 
@@ -209,6 +210,8 @@ function myScript(thisObj) {
             if (parts.length === 2) {
                 inField.text  = parts[0];
                 outField.text = (parts[0] === parts[1]) ? "" : parts[1];
+                savePref("lastIn", inField.text);
+                savePref("lastOut", outField.text);
             }
         };
 
@@ -245,6 +248,8 @@ function myScript(thisObj) {
             if (inVal === outVal) return;
             inField.text  = outVal;
             outField.text = inVal;
+            savePref("lastIn", outVal);
+            savePref("lastOut", inVal);
         };
 
         applyBtn.onClick = function() {
@@ -263,6 +268,8 @@ function myScript(thisObj) {
             if (!easing) return;
             inField.text  = easing[0];
             outField.text = (easing[0] === easing[1]) ? "" : easing[1];
+            savePref("lastIn", inField.text);
+            savePref("lastOut", outField.text);
             setConsole("Easing copied...");
         };
 
