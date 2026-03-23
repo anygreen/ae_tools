@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.0";
+    var SCRIPT_VERSION = "v2.1.1";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -508,20 +508,59 @@ function complexMorphSetupV2(groups) {
 
     app.beginUndoGroup("Complex Morph Setup");
     try {
-        // Match by position in layer stack (lowest index first)
+        // Save comp time so Easy Morph calls (which read comp.time) start at t0
+        var savedTime = comp.time;
+        comp.time = t0;
+
         for (var i = 0; i < layerCount; i++) {
-            applyComplexMorphToColor(
-                groups["small"][i].layer,
-                groups["big"][i].layer,
-                solids[i],
-                t0, t1, t2, t3
-            );
+            var smallLayer = groups["small"][i].layer;
+            var bigLayer   = groups["big"][i].layer;
+            var solidLayer = solids[i];
+
+            var smallHasMask = getReferenceMask(smallLayer) !== null;
+            var bigHasMask   = getReferenceMask(bigLayer) !== null;
+
+            if (smallHasMask && bigHasMask) {
+                // Both have masks: full complex morph with mask path animation
+                applyComplexMorphToColor(smallLayer, bigLayer, solidLayer, t0, t1, t2, t3);
+            } else {
+                // No masks: copy PSD layers into comp and use Easy Morph
+                if (!smallLayer.source || !bigLayer.source) {
+                    throw new Error("Layers without masks must have a source to copy: " +
+                        smallLayer.name + ", " + bigLayer.name);
+                }
+
+                var smallPos = smallLayer.property("Transform").property("Position").value;
+                var bigPos   = bigLayer.property("Transform").property("Position").value;
+
+                // Add source footage as new layers in the active comp
+                var copiedSmall = comp.layers.add(smallLayer.source);
+                copiedSmall.name = smallLayer.name + " (morph ref)";
+                copiedSmall.property("Transform").property("Position").setValue(smallPos);
+
+                var copiedBig = comp.layers.add(bigLayer.source);
+                copiedBig.name = bigLayer.name + " (morph ref)";
+                copiedBig.property("Transform").property("Position").setValue(bigPos);
+
+                // Place right above the solid: copiedBig (top), copiedSmall, solidLayer
+                copiedSmall.moveBefore(solidLayer);
+                copiedBig.moveBefore(copiedSmall);
+
+                // Hide the solid — the copied layers replace it visually
+                solidLayer.enabled = false;
+
+                // Easy Morph: mainLayer=copiedBig (top), refLayer=copiedSmall (bottom)
+                // Morphs small→big (forward) then big→small (reverse), matching complex morph
+                createEasyMorph(comp, [copiedBig, copiedSmall]);
+            }
         }
 
         app.endUndoGroup();
+        comp.time = savedTime;
         alert("Complex Morph applied successfully!");
     } catch (e) {
         app.endUndoGroup();
+        comp.time = savedTime;
         alert("Error: " + e.message + (e.line ? "\nLine: " + e.line : ""));
     }
 }

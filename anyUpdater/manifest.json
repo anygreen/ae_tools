@@ -19,7 +19,7 @@
     {
       "id": "aldi_helper",
       "name": "Aldi Helper",
-      "version": "2.1.0",
+      "version": "2.1.1",
       "files": [
         { "repo": "Aldi_Helper/Aldi_Helper_V2.jsx", "local": "Aldi_Helper_V2.jsx" }
       ],
