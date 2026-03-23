@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.0.2";
+    var SCRIPT_VERSION = "v2.1.0";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -103,7 +103,7 @@
     morphContent.spacing = 5;
 
     // groups stores { layers: [ {layer, compName, layerName}, ... ] } indexed by "small"/"big"
-    // Each group holds 3 layer refs sorted by index (top=0, mid=1, bottom=2)
+    // Each group holds 1-3 layer refs sorted by index (lowest index first)
     var groups = { "small": null, "big": null };
     var groupFields = {};
     var groupKeys = ["small", "big"];
@@ -133,8 +133,9 @@
                     alert("Activate a composition first.");
                     return;
                 }
-                if (activeComp.selectedLayers.length !== 3) {
-                    alert("Select exactly 3 layers for " + groupLabels[key] + ".");
+                var count = activeComp.selectedLayers.length;
+                if (count < 1 || count > 3) {
+                    alert("Select 1, 2 or 3 layers for " + groupLabels[key] + ".");
                     return;
                 }
 
@@ -155,7 +156,7 @@
                     });
                     names.push(sel[i].name);
                 }
-                fld.text = names.join(" / ");
+                fld.text = "[" + count + "] " + names.join(" / ");
             };
         })(groupKeys[k]);
     }
@@ -170,7 +171,7 @@
         }
     };
 
-    morphContent.add("statictext", undefined, "Select 3 solids in main comp, then:").alignment = ["fill", "top"];
+    morphContent.add("statictext", undefined, "Select matching solids in main comp:").alignment = ["fill", "top"];
 
     var applyMorphBtn = morphContent.add("button", undefined, "Apply Complex Morph");
     applyMorphBtn.alignment = ["fill", "bottom"];
@@ -446,6 +447,15 @@ function complexMorphSetupV2(groups) {
         return;
     }
 
+    // Validate both groups have the same number of layers
+    var layerCount = groups["small"].length;
+    if (groups["big"].length !== layerCount) {
+        alert("Layer count mismatch:\n  Kachel small: " + layerCount +
+              " layers\n  Kachel big: " + groups["big"].length +
+              " layers\n\nBoth groups must have the same number of layers.");
+        return;
+    }
+
     // Validate stored layer refs are still accessible (guards against deleted layers)
     var staleRefs = [];
     var groupKeys = ["small", "big"];
@@ -475,8 +485,10 @@ function complexMorphSetupV2(groups) {
         return;
     }
 
-    if (comp.selectedLayers.length !== 3) {
-        alert("Please select exactly 3 solid layers in the active composition.\n(currently " + comp.selectedLayers.length + " selected)");
+    if (comp.selectedLayers.length !== layerCount) {
+        alert("Please select exactly " + layerCount + " solid layer" + (layerCount > 1 ? "s" : "") +
+              " in the active composition (matching the " + layerCount + " captured per group)." +
+              "\n\nCurrently " + comp.selectedLayers.length + " selected.");
         return;
     }
 
@@ -496,8 +508,8 @@ function complexMorphSetupV2(groups) {
 
     app.beginUndoGroup("Complex Morph Setup");
     try {
-        // Match by position in layer stack: index 0 = top, 1 = mid, 2 = bottom
-        for (var i = 0; i < 3; i++) {
+        // Match by position in layer stack (lowest index first)
+        for (var i = 0; i < layerCount; i++) {
             applyComplexMorphToColor(
                 groups["small"][i].layer,
                 groups["big"][i].layer,
