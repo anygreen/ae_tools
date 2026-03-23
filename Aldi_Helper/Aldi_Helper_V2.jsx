@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.1";
+    var SCRIPT_VERSION = "v2.1.2";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -109,6 +109,12 @@
     var groupKeys = ["small", "big"];
     var groupLabels = { "small": "Kachel small", "big": "Kachel big" };
 
+    var contentGroups = { "small": null, "big": null };
+    var contentFields = {};
+    var contentLabels = { "small": "Content small", "big": "Content big" };
+    var coverData = null;
+    var coverField = null;
+
     for (var k = 0; k < groupKeys.length; k++) {
         (function(key) {
             var row = morphContent.add("group");
@@ -161,6 +167,97 @@
         })(groupKeys[k]);
     }
 
+    // ─── Content fields (optional) ─────────────────────────────────────────
+
+    for (var k = 0; k < groupKeys.length; k++) {
+        (function(key) {
+            var row = morphContent.add("group");
+            row.orientation = "row";
+            row.alignment = ["fill", "top"];
+            row.spacing = 4;
+
+            row.add("statictext", undefined, contentLabels[key] + ":");
+
+            var fld = row.add("edittext", undefined, "");
+            fld.enabled = false;
+            fld.alignment = ["fill", "center"];
+            contentFields[key] = fld;
+
+            var btn = row.add("button", undefined, "Set");
+            btn.alignment = ["right", "center"];
+            btn.preferredSize = [60, 24];
+
+            btn.onClick = function() {
+                var activeComp = app.project.activeItem;
+                if (!activeComp || !(activeComp instanceof CompItem)) {
+                    alert("Activate a composition first.");
+                    return;
+                }
+                var count = activeComp.selectedLayers.length;
+                if (count < 1) {
+                    alert("Select at least 1 layer for " + contentLabels[key] + ".");
+                    return;
+                }
+
+                var sel = [];
+                for (var i = 0; i < activeComp.selectedLayers.length; i++) {
+                    sel.push(activeComp.selectedLayers[i]);
+                }
+                sel.sort(function(a, b) { return a.index - b.index; });
+
+                contentGroups[key] = [];
+                var names = [];
+                for (var i = 0; i < sel.length; i++) {
+                    contentGroups[key].push({
+                        layer:     sel[i],
+                        compName:  activeComp.name,
+                        layerName: sel[i].name
+                    });
+                    names.push(sel[i].name);
+                }
+                fld.text = "[" + count + "] " + names.join(" / ");
+            };
+        })(groupKeys[k]);
+    }
+
+    // ─── Cover layer field (optional) ───────────────────────────────────────
+
+    var coverRow = morphContent.add("group");
+    coverRow.orientation = "row";
+    coverRow.alignment = ["fill", "top"];
+    coverRow.spacing = 4;
+
+    coverRow.add("statictext", undefined, "Cover layer:");
+
+    coverField = coverRow.add("edittext", undefined, "");
+    coverField.enabled = false;
+    coverField.alignment = ["fill", "center"];
+
+    var coverBtn = coverRow.add("button", undefined, "Set");
+    coverBtn.alignment = ["right", "center"];
+    coverBtn.preferredSize = [60, 24];
+
+    coverBtn.onClick = function() {
+        var activeComp = app.project.activeItem;
+        if (!activeComp || !(activeComp instanceof CompItem)) {
+            alert("Activate a composition first.");
+            return;
+        }
+        if (activeComp.selectedLayers.length !== 1) {
+            alert("Select exactly 1 layer for Cover.");
+            return;
+        }
+        var sel = activeComp.selectedLayers[0];
+        coverData = {
+            layer:     sel,
+            compName:  activeComp.name,
+            layerName: sel.name
+        };
+        coverField.text = sel.name;
+    };
+
+    // ─── Reset / Apply ──────────────────────────────────────────────────────
+
     var resetBtn = morphContent.add("button", undefined, "Reset");
     resetBtn.alignment = ["right", "top"];
     resetBtn.preferredSize = [60, 22];
@@ -168,7 +265,11 @@
         for (var i = 0; i < groupKeys.length; i++) {
             groups[groupKeys[i]] = null;
             groupFields[groupKeys[i]].text = "";
+            contentGroups[groupKeys[i]] = null;
+            contentFields[groupKeys[i]].text = "";
         }
+        coverData = null;
+        coverField.text = "";
     };
 
     morphContent.add("statictext", undefined, "Select matching solids in main comp:").alignment = ["fill", "top"];
@@ -178,7 +279,7 @@
 
     applyMorphBtn.onClick = function() {
         try {
-            complexMorphSetupV2(groups);
+            complexMorphSetupV2(groups, contentGroups, coverData);
         } catch (err) {
             alert("An error occurred: " + err.toString());
         }
@@ -190,7 +291,7 @@
 
     // TabbedPanel layout only measures the first (active) tab. Set an explicit
     // minimum size large enough to hold the Complex Morph tab content.
-    tabs.minimumSize = [200, 200];
+    tabs.minimumSize = [200, 340];
     mainGroup.minimumSize = mainGroup.size;
 
     panel.layout.resize();
@@ -435,8 +536,8 @@ function createRevealAnimation(comp, selectedLayers) {
 
 // ─── Complex Morph V2 ─────────────────────────────────────────────────────────
 
-function complexMorphSetupV2(groups) {
-    // Validate both groups are captured
+function complexMorphSetupV2(groups, contentGroups, coverData) {
+    // Validate kachel groups are captured
     if (!groups["small"] || !groups["big"]) {
         var missing = [];
         if (!groups["small"]) missing.push("Kachel small");
@@ -447,28 +548,54 @@ function complexMorphSetupV2(groups) {
         return;
     }
 
-    // Validate both groups have the same number of layers
+    // Validate kachel groups have the same number of layers
     var layerCount = groups["small"].length;
     if (groups["big"].length !== layerCount) {
-        alert("Layer count mismatch:\n  Kachel small: " + layerCount +
+        alert("Kachel layer count mismatch:\n  Kachel small: " + layerCount +
               " layers\n  Kachel big: " + groups["big"].length +
+              " layers\n\nBoth groups must have the same number of layers.");
+        return;
+    }
+
+    // Validate content groups if set (both must be set or both empty)
+    var hasContent = contentGroups["small"] && contentGroups["big"];
+    if ((contentGroups["small"] && !contentGroups["big"]) ||
+        (!contentGroups["small"] && contentGroups["big"])) {
+        alert("Both Content small and Content big must be set, or leave both empty.");
+        return;
+    }
+    if (hasContent && contentGroups["small"].length !== contentGroups["big"].length) {
+        alert("Content layer count mismatch:\n  Content small: " + contentGroups["small"].length +
+              " layers\n  Content big: " + contentGroups["big"].length +
               " layers\n\nBoth groups must have the same number of layers.");
         return;
     }
 
     // Validate stored layer refs are still accessible (guards against deleted layers)
     var staleRefs = [];
-    var groupKeys = ["small", "big"];
-    var groupLabels = { "small": "Kachel small", "big": "Kachel big" };
-    for (var g = 0; g < groupKeys.length; g++) {
-        var grp = groups[groupKeys[g]];
-        for (var i = 0; i < grp.length; i++) {
-            try {
-                var testAccess = grp[i].layer.name;
-            } catch (e) {
-                staleRefs.push(groupLabels[groupKeys[g]] + " layer " + (i + 1) +
-                    " (was: " + grp[i].compName + " / " + grp[i].layerName + ")");
+    var checkSets = [
+        { data: groups, labels: { "small": "Kachel small", "big": "Kachel big" } }
+    ];
+    if (hasContent) {
+        checkSets.push({ data: contentGroups, labels: { "small": "Content small", "big": "Content big" } });
+    }
+    for (var s = 0; s < checkSets.length; s++) {
+        var sides = ["small", "big"];
+        for (var g = 0; g < sides.length; g++) {
+            var grp = checkSets[s].data[sides[g]];
+            for (var i = 0; i < grp.length; i++) {
+                try { var testAccess = grp[i].layer.name; }
+                catch (e) {
+                    staleRefs.push(checkSets[s].labels[sides[g]] + " layer " + (i + 1) +
+                        " (was: " + grp[i].compName + " / " + grp[i].layerName + ")");
+                }
             }
+        }
+    }
+    if (coverData) {
+        try { var testAccess = coverData.layer.name; }
+        catch (e) {
+            staleRefs.push("Cover layer (was: " + coverData.compName + " / " + coverData.layerName + ")");
         }
     }
     if (staleRefs.length > 0) {
@@ -487,9 +614,28 @@ function complexMorphSetupV2(groups) {
 
     if (comp.selectedLayers.length !== layerCount) {
         alert("Please select exactly " + layerCount + " solid layer" + (layerCount > 1 ? "s" : "") +
-              " in the active composition (matching the " + layerCount + " captured per group)." +
+              " in the active composition (matching the " + layerCount + " captured per Kachel group)." +
               "\n\nCurrently " + comp.selectedLayers.length + " selected.");
         return;
+    }
+
+    // Validate cover matches a known group or the active comp
+    if (coverData) {
+        var coverComp = coverData.compName;
+        var coverMatched = (coverComp === comp.name);
+        for (var s = 0; s < checkSets.length && !coverMatched; s++) {
+            var sides = ["small", "big"];
+            for (var g = 0; g < sides.length && !coverMatched; g++) {
+                var grp = checkSets[s].data[sides[g]];
+                for (var i = 0; i < grp.length && !coverMatched; i++) {
+                    if (grp[i].compName === coverComp) coverMatched = true;
+                }
+            }
+        }
+        if (!coverMatched) {
+            alert("Cover layer must come from one of the set groups\u2019 comps or the active comp.");
+            return;
+        }
     }
 
     // Sort selected solids by layer index (top of stack = lowest index)
@@ -499,7 +645,7 @@ function complexMorphSetupV2(groups) {
     }
     solids.sort(function(a, b) { return a.index - b.index; });
 
-    // t0 = 5 seconds (hardcoded start point, same as V1)
+    // Timing
     var fd = comp.frameDuration;
     var t0 = 5;
     var t1 = t0 + 15 * fd;
@@ -508,10 +654,11 @@ function complexMorphSetupV2(groups) {
 
     app.beginUndoGroup("Complex Morph Setup");
     try {
-        // Save comp time so Easy Morph calls (which read comp.time) start at t0
         var savedTime = comp.time;
         comp.time = t0;
 
+        // ─── Process kachel layers ──────────────────────────────────────
+        var anchors = []; // topmost layer ref per pair (for content placement)
         for (var i = 0; i < layerCount; i++) {
             var smallLayer = groups["small"][i].layer;
             var bigLayer   = groups["big"][i].layer;
@@ -521,10 +668,9 @@ function complexMorphSetupV2(groups) {
             var bigHasMask   = getReferenceMask(bigLayer) !== null;
 
             if (smallHasMask && bigHasMask) {
-                // Both have masks: full complex morph with mask path animation
                 applyComplexMorphToColor(smallLayer, bigLayer, solidLayer, t0, t1, t2, t3);
+                anchors.push(solidLayer);
             } else {
-                // No masks: copy PSD layers into comp and use Easy Morph
                 if (!smallLayer.source || !bigLayer.source) {
                     throw new Error("Layers without masks must have a source to copy: " +
                         smallLayer.name + ", " + bigLayer.name);
@@ -533,7 +679,6 @@ function complexMorphSetupV2(groups) {
                 var smallPos = smallLayer.property("Transform").property("Position").value;
                 var bigPos   = bigLayer.property("Transform").property("Position").value;
 
-                // Add source footage as new layers in the active comp
                 var copiedSmall = comp.layers.add(smallLayer.source);
                 copiedSmall.name = smallLayer.name + " (morph ref)";
                 copiedSmall.property("Transform").property("Position").setValue(smallPos);
@@ -542,17 +687,65 @@ function complexMorphSetupV2(groups) {
                 copiedBig.name = bigLayer.name + " (morph ref)";
                 copiedBig.property("Transform").property("Position").setValue(bigPos);
 
-                // Place right above the solid: copiedBig (top), copiedSmall, solidLayer
                 copiedSmall.moveBefore(solidLayer);
                 copiedBig.moveBefore(copiedSmall);
 
-                // Hide the solid — the copied layers replace it visually
                 solidLayer.enabled = false;
-
-                // Easy Morph: mainLayer=copiedBig (top), refLayer=copiedSmall (bottom)
-                // Morphs small→big (forward) then big→small (reverse), matching complex morph
                 createEasyMorph(comp, [copiedBig, copiedSmall]);
+                anchors.push(copiedBig);
             }
+        }
+
+        // ─── Process content layers (optional) ─────────────────────────
+        if (hasContent) {
+            var contentCount = contentGroups["small"].length;
+            // Reverse order preserves correct stacking (bottom-up insertion)
+            for (var j = contentCount - 1; j >= 0; j--) {
+                var cSmall = contentGroups["small"][j];
+                var cBig   = contentGroups["big"][j];
+
+                if (!cSmall.layer.source || !cBig.layer.source) {
+                    throw new Error("Content layers must have a source: " +
+                        cSmall.layerName + ", " + cBig.layerName);
+                }
+
+                var cSmallPos = cSmall.layer.property("Transform").property("Position").value;
+                var cBigPos   = cBig.layer.property("Transform").property("Position").value;
+
+                var copiedCSmall = comp.layers.add(cSmall.layer.source);
+                copiedCSmall.name = cSmall.layerName + " (content ref)";
+                copiedCSmall.property("Transform").property("Position").setValue(cSmallPos);
+
+                var copiedCBig = comp.layers.add(cBig.layer.source);
+                copiedCBig.name = cBig.layerName + " (content ref)";
+                copiedCBig.property("Transform").property("Position").setValue(cBigPos);
+
+                // Place relative to solids based on source index vs kachel indices
+                var contentSrcIdx = cSmall.layer.index;
+                var targetSolid = null;
+                for (var k = 0; k < groups["small"].length; k++) {
+                    if (groups["small"][k].layer.index < contentSrcIdx) {
+                        targetSolid = solids[k];
+                    }
+                }
+
+                if (targetSolid) {
+                    // Content was below this kachel in source → below corresponding solid
+                    copiedCSmall.moveAfter(targetSolid);
+                    copiedCBig.moveBefore(copiedCSmall);
+                } else {
+                    // Content was above all kachels → above the topmost anchor
+                    copiedCSmall.moveBefore(anchors[0]);
+                    copiedCBig.moveBefore(copiedCSmall);
+                }
+
+                createEasyMorph(comp, [copiedCBig, copiedCSmall]);
+            }
+        }
+
+        // ─── Process cover layer (optional) ────────────────────────────
+        if (coverData) {
+            applyCoverMorph(comp, coverData, groups, solids, t0, t1, t2, t3);
         }
 
         app.endUndoGroup();
@@ -562,6 +755,100 @@ function complexMorphSetupV2(groups) {
         app.endUndoGroup();
         comp.time = savedTime;
         alert("Error: " + e.message + (e.line ? "\nLine: " + e.line : ""));
+    }
+}
+
+function applyCoverMorph(comp, coverData, groups, solids, t0, t1, t2, t3) {
+    var coverLayer = coverData.layer;
+    var coverCompName = coverData.compName;
+
+    if (!coverLayer.source) {
+        throw new Error("Cover layer must have a footage source.");
+    }
+
+    // Find which side (small/big) the cover matches by comp name
+    var isSmallSide = true;
+    var matchIdx = 0;
+    var found = false;
+    for (var i = 0; i < groups["small"].length && !found; i++) {
+        if (groups["small"][i].compName === coverCompName) {
+            isSmallSide = true;
+            matchIdx = i;
+            found = true;
+        }
+    }
+    for (var i = 0; i < groups["big"].length && !found; i++) {
+        if (groups["big"][i].compName === coverCompName) {
+            isSmallSide = false;
+            matchIdx = i;
+            found = true;
+        }
+    }
+    // If from active comp, default to first pair / small side
+    if (!found) { matchIdx = 0; isSmallSide = true; }
+
+    // Calculate cover positions using matched pair's position delta
+    var matchSmallPos = groups["small"][matchIdx].layer.property("Transform").property("Position").value;
+    var matchBigPos   = groups["big"][matchIdx].layer.property("Transform").property("Position").value;
+    var coverPos      = coverLayer.property("Transform").property("Position").value;
+
+    var coverSmallPos, coverBigPos;
+    if (isSmallSide) {
+        coverSmallPos = coverPos;
+        coverBigPos = [
+            coverPos[0] + (matchBigPos[0] - matchSmallPos[0]),
+            coverPos[1] + (matchBigPos[1] - matchSmallPos[1])
+        ];
+    } else {
+        coverBigPos = coverPos;
+        coverSmallPos = [
+            coverPos[0] + (matchSmallPos[0] - matchBigPos[0]),
+            coverPos[1] + (matchSmallPos[1] - matchBigPos[1])
+        ];
+    }
+
+    // Copy cover into comp
+    var copiedCover = comp.layers.add(coverLayer.source);
+    copiedCover.name = coverLayer.name + " (cover)";
+
+    // Set anchor point to bottom-left and compensate position
+    var coverH = copiedCover.source.height;
+    var oldAnchor = copiedCover.property("Transform").property("Anchor Point").value;
+    var newAnchor = [0, coverH];
+    var anchorDelta = [newAnchor[0] - oldAnchor[0], newAnchor[1] - oldAnchor[1]];
+    copiedCover.property("Transform").property("Anchor Point").setValue(newAnchor);
+
+    coverSmallPos = [coverSmallPos[0] + anchorDelta[0], coverSmallPos[1] + anchorDelta[1]];
+    coverBigPos   = [coverBigPos[0] + anchorDelta[0],   coverBigPos[1] + anchorDelta[1]];
+
+    // Place right below solid[0] — above all other solids
+    copiedCover.moveAfter(solids[0]);
+
+    // Position keyframes: same timing as kachel morph
+    var posProp = copiedCover.property("Transform").property("Position");
+    posProp.setValueAtTime(t0, coverSmallPos);
+    posProp.setValueAtTime(t1, coverBigPos);
+    posProp.setValueAtTime(t2, coverBigPos);
+    posProp.setValueAtTime(t3, coverSmallPos);
+
+    var easeIn  = new KeyframeEase(0, 66);
+    var easeOut = new KeyframeEase(0, 44);
+
+    for (var k = 1; k <= posProp.numKeys; k++) {
+        posProp.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+        posProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
+    }
+
+    // Scale keyframes: 10% → 100% → 100% → 10%
+    var scaleProp = copiedCover.property("Transform").property("Scale");
+    scaleProp.setValueAtTime(t0, [10, 10]);
+    scaleProp.setValueAtTime(t1, [100, 100]);
+    scaleProp.setValueAtTime(t2, [100, 100]);
+    scaleProp.setValueAtTime(t3, [10, 10]);
+
+    for (var k = 1; k <= scaleProp.numKeys; k++) {
+        scaleProp.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+        scaleProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
     }
 }
 
