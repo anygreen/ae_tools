@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.2";
+    var SCRIPT_VERSION = "v2.1.3";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -841,14 +841,21 @@ function applyCoverMorph(comp, coverData, groups, solids, t0, t1, t2, t3) {
 
     // Scale keyframes: 10% → 100% → 100% → 10%
     var scaleProp = copiedCover.property("Transform").property("Scale");
-    scaleProp.setValueAtTime(t0, [10, 10]);
-    scaleProp.setValueAtTime(t1, [100, 100]);
-    scaleProp.setValueAtTime(t2, [100, 100]);
-    scaleProp.setValueAtTime(t3, [10, 10]);
+    var is3D = scaleProp.value.length === 3;
+    var scaleSmall = is3D ? [10, 10, 100] : [10, 10];
+    var scaleFull  = is3D ? [100, 100, 100] : [100, 100];
+    scaleProp.setValueAtTime(t0, scaleSmall);
+    scaleProp.setValueAtTime(t1, scaleFull);
+    scaleProp.setValueAtTime(t2, scaleFull);
+    scaleProp.setValueAtTime(t3, scaleSmall);
 
     for (var k = 1; k <= scaleProp.numKeys; k++) {
         scaleProp.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-        scaleProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
+        if (is3D) {
+            scaleProp.setTemporalEaseAtKey(k, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
+        } else {
+            scaleProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
+        }
     }
 }
 
