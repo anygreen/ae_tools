@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.4";
+    var SCRIPT_VERSION = "v2.1.5";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -614,7 +614,14 @@ function complexMorphSetupV2(groups, contentGroups, coverData) {
         return;
     }
 
-    // Validate cover matches one of the Kachel layers by name and comp
+    // Sort selected solids by layer index (top of stack = lowest index)
+    var solids = [];
+    for (var i = 0; i < comp.selectedLayers.length; i++) {
+        solids.push(comp.selectedLayers[i]);
+    }
+    solids.sort(function(a, b) { return a.index - b.index; });
+
+    // Validate cover matches a Kachel layer (by name+comp) or a selected solid (by reference)
     if (coverData) {
         var coverMatched = false;
         for (var i = 0; i < groups["small"].length && !coverMatched; i++) {
@@ -625,18 +632,14 @@ function complexMorphSetupV2(groups, contentGroups, coverData) {
             if (coverData.compName === groups["big"][i].compName &&
                 coverData.layerName === groups["big"][i].layerName) coverMatched = true;
         }
+        for (var i = 0; i < solids.length && !coverMatched; i++) {
+            if (coverData.layer === solids[i]) coverMatched = true;
+        }
         if (!coverMatched) {
-            alert("Cover layer must be one of the Kachel layers.\nSet a layer that was also captured in Kachel small or Kachel big.");
+            alert("Cover layer must be one of the Kachel layers or one of the selected layers.");
             return;
         }
     }
-
-    // Sort selected solids by layer index (top of stack = lowest index)
-    var solids = [];
-    for (var i = 0; i < comp.selectedLayers.length; i++) {
-        solids.push(comp.selectedLayers[i]);
-    }
-    solids.sort(function(a, b) { return a.index - b.index; });
 
     // Timing
     var fd = comp.frameDuration;
@@ -738,7 +741,7 @@ function complexMorphSetupV2(groups, contentGroups, coverData) {
 
         // ─── Process cover layer (optional) ────────────────────────────
         if (coverData) {
-            applyCoverMorph(comp, coverData, groups, anchors, t0, t1, t2, t3);
+            applyCoverMorph(coverData, groups, solids, anchors, t0, t1, t2, t3);
         }
 
         app.endUndoGroup();
@@ -751,14 +754,8 @@ function complexMorphSetupV2(groups, contentGroups, coverData) {
     }
 }
 
-function applyCoverMorph(comp, coverData, groups, anchors, t0, t1, t2, t3) {
-    var coverLayer = coverData.layer;
-
-    if (!coverLayer.source) {
-        throw new Error("Cover layer must have a footage source.");
-    }
-
-    // Match cover to a kachel layer by name and comp
+function applyCoverMorph(coverData, groups, solids, anchors, t0, t1, t2, t3) {
+    // Match cover to a kachel layer (by name+comp) or a selected solid (by reference)
     var matchIdx = -1;
     for (var i = 0; i < groups["small"].length && matchIdx === -1; i++) {
         if (coverData.compName === groups["small"][i].compName &&
@@ -772,84 +769,94 @@ function applyCoverMorph(comp, coverData, groups, anchors, t0, t1, t2, t3) {
             matchIdx = i;
         }
     }
+    for (var i = 0; i < solids.length && matchIdx === -1; i++) {
+        if (coverData.layer === solids[i]) {
+            matchIdx = i;
+        }
+    }
     if (matchIdx === -1) {
-        throw new Error("Cover layer must match one of the Kachel layers.");
+        throw new Error("Cover layer must match one of the Kachel layers or selected solids.");
     }
 
-    var smallLayer = groups["small"][matchIdx].layer;
-    var bigLayer   = groups["big"][matchIdx].layer;
-    var companion  = anchors[matchIdx];
+    var companion = anchors[matchIdx];
 
-    // Get positions and dimensions of the matched kachel pair
+    // Duplicate the animated layer
+    var coverDup = companion.duplicate();
+    coverDup.name = companion.name + " Cover";
+
+    // Remove masks from duplicate (alpha matte handles clipping)
+    var coverMasks = coverDup.mask;
+    if (coverMasks) {
+        while (coverMasks.numProperties > 0) {
+            coverMasks.property(1).remove();
+        }
+    }
+
+    // Remove effects from duplicate (e.g. blend from Easy Morph)
+    var coverEffects = coverDup.property("Effects");
+    while (coverEffects.numProperties > 0) {
+        coverEffects.property(1).remove();
+    }
+
+    // Read the original anchor before changing it
+    var origAnchor = companion.property("Transform").property("Anchor Point").value;
+
+    // Set anchor to bottom-left of layer source
+    var coverSize = getLayerSourceSize(coverDup);
+    var coverH = coverSize[1];
+    var newAnchor = [0, coverH];
+    coverDup.property("Transform").property("Anchor Point").setValue(newAnchor);
+
+    // Get kachel pair data for positioning
+    var smallLayer  = groups["small"][matchIdx].layer;
+    var bigLayer    = groups["big"][matchIdx].layer;
     var smallPos    = smallLayer.property("Transform").property("Position").value;
     var bigPos      = bigLayer.property("Transform").property("Position").value;
     var smallAnchor = smallLayer.property("Transform").property("Anchor Point").value;
-    var bigAnchor   = bigLayer.property("Transform").property("Anchor Point").value;
     var smallSize   = getLayerSourceSize(smallLayer);
-    var bigSize     = getLayerSourceSize(bigLayer);
-    var smallW = smallSize[0], smallH = smallSize[1];
-    var bigW   = bigSize[0],   bigH   = bigSize[1];
+    var smallH      = smallSize[1];
 
-    // Bottom-left corner in comp space for each kachel state
-    var blSmall = [smallPos[0] - smallAnchor[0], smallPos[1] - smallAnchor[1] + smallH];
-    var blBig   = [bigPos[0] - bigAnchor[0],     bigPos[1] - bigAnchor[1] + bigH];
+    // Small state: cover bottom-left aligned with kachel small bottom-left
+    var coverSmallPos = [
+        smallPos[0] - smallAnchor[0],
+        smallPos[1] - smallAnchor[1] + smallH
+    ];
 
-    // Add cover source to comp
-    var copiedCover = comp.layers.add(coverLayer.source);
-    copiedCover.name = coverLayer.name + " (cover)";
+    // Big state: match exactly with original (compensate for anchor change)
+    var coverBigPos = [
+        bigPos[0] + newAnchor[0] - origAnchor[0],
+        bigPos[1] + newAnchor[1] - origAnchor[1]
+    ];
 
-    // Set anchor to bottom-left of cover layer
-    var coverSize = getLayerSourceSize(copiedCover);
-    var coverW = coverSize[0], coverH = coverSize[1];
-    copiedCover.property("Transform").property("Anchor Point").setValue([0, coverH]);
+    // Clear existing position keyframes and set new ones
+    var posProp = coverDup.property("Transform").property("Position");
+    while (posProp.numKeys > 0) {
+        posProp.removeKey(1);
+    }
 
-    // Place cover right below companion, then duplicate companion for alpha matte
-    copiedCover.moveAfter(companion);
-    var matteDuplicate = companion.duplicate();
-    matteDuplicate.moveAfter(companion);
-
-    // Cover uses the matte for shape; original companion stays visible
-    copiedCover.setTrackMatte(matteDuplicate, TrackMatteType.ALPHA);
-
-    // Position keyframes: bottom-left of small kachel → bottom-left of big kachel
-    var posProp = copiedCover.property("Transform").property("Position");
-    posProp.setValueAtTime(t0, blSmall);
-    posProp.setValueAtTime(t1, blBig);
-    posProp.setValueAtTime(t2, blBig);
-    posProp.setValueAtTime(t3, blSmall);
+    posProp.setValueAtTime(t0, coverSmallPos);
+    posProp.setValueAtTime(t1, coverBigPos);
+    posProp.setValueAtTime(t2, coverBigPos);
+    posProp.setValueAtTime(t3, coverSmallPos);
 
     var easeIn  = new KeyframeEase(0, 66);
     var easeOut = new KeyframeEase(0, 44);
-
     for (var k = 1; k <= posProp.numKeys; k++) {
         posProp.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
         posProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
     }
 
-    // Scale: match kachel size at each state
-    var scaleSmallX = (smallW / coverW) * 100;
-    var scaleSmallY = (smallH / coverH) * 100;
-    var scaleBigX   = (bigW / coverW) * 100;
-    var scaleBigY   = (bigH / coverH) * 100;
-
-    var scaleProp = copiedCover.property("Transform").property("Scale");
-    var is3D = scaleProp.value.length === 3;
-    var sSmall = is3D ? [scaleSmallX, scaleSmallY, 100] : [scaleSmallX, scaleSmallY];
-    var sBig   = is3D ? [scaleBigX, scaleBigY, 100]     : [scaleBigX, scaleBigY];
-
-    scaleProp.setValueAtTime(t0, sSmall);
-    scaleProp.setValueAtTime(t1, sBig);
-    scaleProp.setValueAtTime(t2, sBig);
-    scaleProp.setValueAtTime(t3, sSmall);
-
-    for (var k = 1; k <= scaleProp.numKeys; k++) {
-        scaleProp.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
-        if (is3D) {
-            scaleProp.setTemporalEaseAtKey(k, [easeIn, easeIn, easeIn], [easeOut, easeOut, easeOut]);
-        } else {
-            scaleProp.setTemporalEaseAtKey(k, [easeIn], [easeOut]);
-        }
+    // Clear scale keyframes and reset to 100%
+    var scaleProp = coverDup.property("Transform").property("Scale");
+    while (scaleProp.numKeys > 0) {
+        scaleProp.removeKey(1);
     }
+    var is3D = scaleProp.value.length === 3;
+    scaleProp.setValue(is3D ? [100, 100, 100] : [100, 100]);
+
+    // Place cover below companion and use original as alpha matte (AE 2025+)
+    coverDup.moveAfter(companion);
+    coverDup.setTrackMatte(companion, TrackMatteType.ALPHA);
 }
 
 function applyComplexMorphToColor(smallLayer, bigLayer, solidLayer, t0, t1, t2, t3) {
