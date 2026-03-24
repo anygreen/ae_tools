@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.0.2
+ * @version 2.0.3
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.0.2";
+    var SCRIPT_VERSION = "v2.0.3";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1654,8 +1654,8 @@
             panel.layout.layout(true);
 
             var testPort    = ftpConfig.port || "21";
-            var testUrl     = "ftp://" + ftpConfig.hostname + ":" + testPort + "/";
-            var testCommand = "curl -s -l --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
+            var testUrl     = "ftps://" + ftpConfig.hostname + ":" + testPort + "/";
+            var testCommand = "curl -s -l --ssl-reqd -k --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
             var testResult  = executeCommand(testCommand);
 
             if (!testResult || testResult.length === 0) {

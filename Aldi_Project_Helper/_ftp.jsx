@@ -209,8 +209,8 @@
      */
     function listFTPFiles(ftpConfig, remotePath) {
         var port = ftpConfig.port || "21";
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
-        var command = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
+        var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
             var output = executeCommand(command);
@@ -240,8 +240,8 @@
     function listFTPFilesRecursive(ftpConfig, remotePath, currentPath, results) {
         var fullPath = remotePath + (currentPath ? "/" + currentPath : "");
         var port = ftpConfig.port || "21";
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
-        var command = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
+        var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
             var output = executeCommand(command);
@@ -254,8 +254,8 @@
 
                 var itemPath = currentPath ? currentPath + "/" + item : item;
 
-                var testUrl = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
-                var testCommand = "curl -s -l --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
+                var testUrl = "ftps://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
+                var testCommand = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
 
                 try {
                     var testOutput = executeCommand(testCommand);
@@ -347,7 +347,7 @@
     function downloadFTPFile(ftpConfig, remotePath, localPath) {
         var port = ftpConfig.port || "21";
         var encodedRemotePath = encodeURIPathForFTP(remotePath);
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
+        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         var localFile = new File(localPath);
         var localDir  = localFile.parent;
@@ -355,7 +355,7 @@
             localDir.create();
         }
 
-        var command = "curl -s -R --user " + ftpConfig.username + ":" + ftpConfig.password +
+        var command = "curl -s -R --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " -o \"" + localPath + "\" \"" + url + "\"";
 
         try {
@@ -378,7 +378,7 @@
     function uploadFTPFile(ftpConfig, localPath, remotePath) {
         var port = ftpConfig.port || "21";
         var encodedRemotePath = encodeURIPathForFTP(remotePath);
-        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
+        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         var localFile  = new File(localPath);
         var modTimeUTC = "";
@@ -388,7 +388,7 @@
 
         var filename = getFilenameFromPath(remotePath);
 
-        var command = "curl -s --user " + ftpConfig.username + ":" + ftpConfig.password +
+        var command = "curl -s --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " --ftp-create-dirs";
 
         if (modTimeUTC) {
