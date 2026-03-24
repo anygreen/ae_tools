@@ -42,6 +42,9 @@
         for (var i = 0; i < lines.length; i++) {
             var line = lines[i].replace(/^\s+|\s+$/g, "");
             if (line.indexOf("curl:") === 0 || line.indexOf("curl_easy") !== -1) {
+                // Windows Schannel reports missing close_notify on TLS teardown
+                // but data transfer completes successfully — ignore this error
+                if (!IS_MAC && line.indexOf("close_notify") !== -1) continue;
                 errorLines.push(line);
             }
         }
