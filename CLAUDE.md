@@ -140,7 +140,7 @@ var SCRIPT_VERSION = "v2.0.2";  // must match manifest.json version (with "v" pr
 ```
 
 Tracked scripts and their current manifest versions:
-- `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.6`
+- `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.7`
 - `Aldi_Helper/Aldi_Helper_V2.jsx` — `v2.1.6`
 - `anyKV/anyKV.jsx` — `v1.0.2`
 - `anyUpdater/anyUpdater.jsx` — `v1.1.0`
@@ -226,7 +226,6 @@ Key curl flags (centralised in `getTLSFlags()`):
 - `--ssl-reqd` — require TLS for all FTP operations
 - `-k` — allow self-signed/mismatched certificates
 - `--ssl-no-revoke` — Windows only, prevents Schannel CRL check failures
-- `--ftp-ssl-ccc` — Windows only, clear command channel after auth (avoids Schannel `missing close_notify` error)
 - `--tls-max 1.2` — Windows only, pin TLS 1.2 for reliable Schannel negotiation
 
 Connection errors are detected by `getCurlError()` (extracts only `curl:` error lines from output) and tested upfront via `testFTPConnection()` before any sync or upload operation. On failure the operation aborts with a clear error message. The connection test uses `-sS` (silent + show errors) with `--max-time 30` to cap total duration.

@@ -16,14 +16,13 @@
      * Returns curl TLS flags for explicit FTPS (AUTH TLS on port 21).
      * On Windows, adds Schannel-specific workarounds:
      *   --ssl-no-revoke   bypass CRL check failures
-     *   --ftp-ssl-ccc     clear command channel after auth (avoids missing close_notify)
      *   --tls-max 1.2     pin to TLS 1.2 for reliable Schannel negotiation
      * @returns {string} TLS flags for curl
      */
     function getTLSFlags() {
         var flags = "--ssl-reqd -k";
         if (!IS_MAC) {
-            flags += " --ssl-no-revoke --ftp-ssl-ccc --tls-max 1.2";
+            flags += " --ssl-no-revoke --tls-max 1.2";
         }
         return flags;
     }
