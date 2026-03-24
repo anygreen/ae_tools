@@ -1654,7 +1654,7 @@
             panel.layout.layout(true);
 
             var testPort    = ftpConfig.port || "21";
-            var testUrl     = "ftps://" + ftpConfig.hostname + ":" + testPort + "/";
+            var testUrl     = "ftp://" + ftpConfig.hostname + ":" + testPort + "/";
             var testCommand = "curl -s -l --ssl-reqd -k --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
             var testResult  = executeCommand(testCommand);
 

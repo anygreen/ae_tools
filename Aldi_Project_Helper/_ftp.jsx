@@ -209,7 +209,7 @@
      */
     function listFTPFiles(ftpConfig, remotePath) {
         var port = ftpConfig.port || "21";
-        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
         var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
@@ -240,7 +240,7 @@
     function listFTPFilesRecursive(ftpConfig, remotePath, currentPath, results) {
         var fullPath = remotePath + (currentPath ? "/" + currentPath : "");
         var port = ftpConfig.port || "21";
-        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
         var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
@@ -254,7 +254,7 @@
 
                 var itemPath = currentPath ? currentPath + "/" + item : item;
 
-                var testUrl = "ftps://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
+                var testUrl = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
                 var testCommand = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
 
                 try {
@@ -347,7 +347,7 @@
     function downloadFTPFile(ftpConfig, remotePath, localPath) {
         var port = ftpConfig.port || "21";
         var encodedRemotePath = encodeURIPathForFTP(remotePath);
-        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         var localFile = new File(localPath);
         var localDir  = localFile.parent;
@@ -378,7 +378,7 @@
     function uploadFTPFile(ftpConfig, localPath, remotePath) {
         var port = ftpConfig.port || "21";
         var encodedRemotePath = encodeURIPathForFTP(remotePath);
-        var url = "ftps://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + encodedRemotePath;
 
         var localFile  = new File(localPath);
         var modTimeUTC = "";
