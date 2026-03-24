@@ -14,26 +14,40 @@
 
     /**
      * Returns curl TLS flags for explicit FTPS (AUTH TLS on port 21).
-     * On Windows, adds --ssl-no-revoke to prevent Schannel CRL check failures.
+     * On Windows, adds Schannel-specific workarounds:
+     *   --ssl-no-revoke   bypass CRL check failures
+     *   --ftp-ssl-ccc     clear command channel after auth (avoids missing close_notify)
+     *   --tls-max 1.2     pin to TLS 1.2 for reliable Schannel negotiation
      * @returns {string} TLS flags for curl
      */
     function getTLSFlags() {
         var flags = "--ssl-reqd -k";
         if (!IS_MAC) {
-            flags += " --ssl-no-revoke";
+            flags += " --ssl-no-revoke --ftp-ssl-ccc --tls-max 1.2";
         }
         return flags;
     }
 
     /**
-     * Checks if curl output contains an error message
+     * Checks if curl output contains an error message.
+     * Extracts only the error lines (starting with "curl:") to avoid
+     * showing progress meter noise in error dialogs.
      * @param {string} output - curl output
      * @returns {string|null} Error message if found, null otherwise
      */
     function getCurlError(output) {
         if (!output || output.length === 0) return "No response from server";
-        if (output.indexOf("curl:") !== -1) return output.replace(/^\s+|\s+$/g, "");
-        if (output.indexOf("curl_easy") !== -1) return output.replace(/^\s+|\s+$/g, "");
+
+        var lines = output.split("\n");
+        var errorLines = [];
+        for (var i = 0; i < lines.length; i++) {
+            var line = lines[i].replace(/^\s+|\s+$/g, "");
+            if (line.indexOf("curl:") === 0 || line.indexOf("curl_easy") !== -1) {
+                errorLines.push(line);
+            }
+        }
+
+        if (errorLines.length > 0) return errorLines.join("\n");
         return null;
     }
 
@@ -45,8 +59,9 @@
     function testFTPConnection(ftpConfig) {
         var port = ftpConfig.port || "21";
         var url = "ftp://" + ftpConfig.hostname + ":" + port + "/";
-        var command = "curl -S -l " + getTLSFlags() + " --connect-timeout 10 --user " +
+        var command = "curl -sS -l " + getTLSFlags() + " --connect-timeout 10 --max-time 30 --user " +
                       ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+        if (IS_MAC) command += " 2>&1";
 
         try {
             var output = executeCommand(command);
@@ -239,6 +254,11 @@
                     result = outFile.read();
                     outFile.close();
                 }
+
+                // Clean up temp files (contain credentials in plaintext)
+                try { bat.remove(); } catch(ex) {}
+                try { vbs.remove(); } catch(ex) {}
+                try { if (outFile.exists) outFile.remove(); } catch(ex) {}
             }
         } catch (e) {
             result = "";
@@ -309,7 +329,7 @@
 
                 try {
                     var testOutput = executeCommand(testCommand);
-                    if (testOutput && testOutput.length > 0 && testOutput.indexOf("curl:") === -1) {
+                    if (testOutput && testOutput.length > 0 && !getCurlError(testOutput)) {
                         listFTPFilesRecursive(ftpConfig, remotePath, itemPath, results);
                     } else {
                         results.push({ relativePath: itemPath, name: item });
@@ -450,7 +470,8 @@
         command += " -T \"" + localPath + "\" \"" + url + "\"";
 
         try {
-            executeCommand(command);
+            var output = executeCommand(command);
+            if (getCurlError(output)) return false;
             return true;
         } catch (e) {
             return false;
