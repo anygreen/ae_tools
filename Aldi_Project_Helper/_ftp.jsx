@@ -13,6 +13,52 @@
     // ============================================================
 
     /**
+     * Returns curl TLS flags for explicit FTPS (AUTH TLS on port 21).
+     * On Windows, adds --ssl-no-revoke to prevent Schannel CRL check failures.
+     * @returns {string} TLS flags for curl
+     */
+    function getTLSFlags() {
+        var flags = "--ssl-reqd -k";
+        if (!IS_MAC) {
+            flags += " --ssl-no-revoke";
+        }
+        return flags;
+    }
+
+    /**
+     * Checks if curl output contains an error message
+     * @param {string} output - curl output
+     * @returns {string|null} Error message if found, null otherwise
+     */
+    function getCurlError(output) {
+        if (!output || output.length === 0) return "No response from server";
+        if (output.indexOf("curl:") !== -1) return output.replace(/^\s+|\s+$/g, "");
+        if (output.indexOf("curl_easy") !== -1) return output.replace(/^\s+|\s+$/g, "");
+        return null;
+    }
+
+    /**
+     * Tests FTP connection and returns detailed result
+     * @param {Object} ftpConfig - FTP connection config
+     * @returns {Object} {success: boolean, error: string|null}
+     */
+    function testFTPConnection(ftpConfig) {
+        var port = ftpConfig.port || "21";
+        var url = "ftp://" + ftpConfig.hostname + ":" + port + "/";
+        var command = "curl -S -l " + getTLSFlags() + " --connect-timeout 10 --user " +
+                      ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+
+        try {
+            var output = executeCommand(command);
+            var error = getCurlError(output);
+            if (error) return { success: false, error: error };
+            return { success: true, error: null };
+        } catch (e) {
+            return { success: false, error: e.message || "Unknown connection error" };
+        }
+    }
+
+    /**
      * Loads FTP connections from the config file
      * @returns {Array} Array of FTP connection objects
      */
@@ -210,10 +256,12 @@
     function listFTPFiles(ftpConfig, remotePath) {
         var port = ftpConfig.port || "21";
         var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/";
-        var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+        var command = "curl -s -l " + getTLSFlags() + " --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
             var output = executeCommand(command);
+            if (getCurlError(output)) return [];
+
             var files = [];
             var lines = output.split("\n");
 
@@ -241,10 +289,12 @@
         var fullPath = remotePath + (currentPath ? "/" + currentPath : "");
         var port = ftpConfig.port || "21";
         var url = "ftp://" + ftpConfig.hostname + ":" + port + "/" + fullPath + "/";
-        var command = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
+        var command = "curl -s -l " + getTLSFlags() + " --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + url + "\"";
 
         try {
             var output = executeCommand(command);
+            if (getCurlError(output)) return;
+
             var items = output.split("\n");
 
             for (var i = 0; i < items.length; i++) {
@@ -255,7 +305,7 @@
                 var itemPath = currentPath ? currentPath + "/" + item : item;
 
                 var testUrl = "ftp://" + ftpConfig.hostname + ":" + port + "/" + remotePath + "/" + itemPath + "/";
-                var testCommand = "curl -s -l --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
+                var testCommand = "curl -s -l " + getTLSFlags() + " --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
 
                 try {
                     var testOutput = executeCommand(testCommand);
@@ -355,7 +405,7 @@
             localDir.create();
         }
 
-        var command = "curl -s -R --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password +
+        var command = "curl -s -R " + getTLSFlags() + " --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " -o \"" + localPath + "\" \"" + url + "\"";
 
         try {
@@ -388,7 +438,7 @@
 
         var filename = getFilenameFromPath(remotePath);
 
-        var command = "curl -s --ssl-reqd -k --user " + ftpConfig.username + ":" + ftpConfig.password +
+        var command = "curl -s " + getTLSFlags() + " --user " + ftpConfig.username + ":" + ftpConfig.password +
                       " --ftp-create-dirs";
 
         if (modTimeUTC) {

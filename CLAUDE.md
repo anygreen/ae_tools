@@ -126,7 +126,8 @@ Whenever you modify **any script that is listed in `manifest.json`**:
 
 1. **Increment `SCRIPT_VERSION`** in that script's source (e.g. `"v2.0.1"` → `"v2.0.2"`).
 2. **Update the `version` field** for that tool in `manifest.json` to match (without the `v` prefix, e.g. `"2.0.2"`).
-3. Commit and push both files together.
+3. **Update the version list in this CLAUDE.md** file (see "Tracked scripts" below).
+4. Commit and push all files together.
 
 anyUpdater compares the manifest version against the version stored in AE preferences. If they differ, it shows the tool as needing an update. anyUpdater tracks its own version from `SCRIPT_VERSION` at runtime (not from prefs) so it always reflects the running file.
 
@@ -139,7 +140,7 @@ var SCRIPT_VERSION = "v2.0.2";  // must match manifest.json version (with "v" pr
 ```
 
 Tracked scripts and their current manifest versions:
-- `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.1`
+- `Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx` — `v2.0.5`
 - `Aldi_Helper/Aldi_Helper_V2.jsx` — `v2.1.6`
 - `anyKV/anyKV.jsx` — `v1.0.2`
 - `anyUpdater/anyUpdater.jsx` — `v1.1.0`
@@ -152,9 +153,10 @@ Tracked scripts and their current manifest versions:
    - Implement standard IIFE wrapper pattern
    - Add error handling and undo groups
 
-2. **Version increments**:
-   - Update `SCRIPT_VERSION` variable in the script (in-place, no new file needed for tools managed by anyUpdater)
+2. **Version increments** (for tools listed in `manifest.json`):
+   - Update `SCRIPT_VERSION` variable in the script
    - Update the matching `version` field in `manifest.json`
+   - Update the version list in this CLAUDE.md file
 
 3. **Testing**:
    - Scripts must be tested directly in After Effects
@@ -215,6 +217,17 @@ for (var i = 0; i < selectedProps.length; i++) {
     }
 }
 ```
+
+## FTP / FTPS
+
+`Aldi_Project_Helper/_ftp.jsx` implements FTP operations via `curl` (executed through `system.callSystem`). Uses **explicit FTPS** (AUTH TLS on port 21) — not implicit FTPS (port 990).
+
+Key curl flags:
+- `--ssl-reqd` — require TLS for all FTP operations
+- `-k` — allow self-signed/mismatched certificates
+- `--ssl-no-revoke` — Windows only, prevents Schannel CRL check failures
+
+All TLS flags are centralised in `getTLSFlags()`. Connection errors are detected by `getCurlError()` and tested upfront via `testFTPConnection()` before any sync or upload operation. On failure the operation aborts with a clear error message.
 
 ## ExtendScript Limitations
 

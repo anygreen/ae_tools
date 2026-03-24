@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.0.4
+ * @version 2.0.5
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.0.4";
+    var SCRIPT_VERSION = "v2.0.5";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1576,8 +1576,23 @@
             ftpLocationDropdown.selection = 1;
 
             progressOverallBar.value    = 0;
-            progressOverallLabel.text   = "Scanning rendered files...";
+            progressOverallLabel.text   = "Testing FTP connection...";
             progressStatusText.text     = "";
+            panel.layout.layout(true);
+
+            var connTest = testFTPConnection(ftpConfig);
+            if (!connTest.success) {
+                alert("Render complete, but FTP connection failed.\n\n" +
+                      "Host: " + ftpConfig.hostname + "\n" +
+                      "User: " + ftpConfig.username + "\n\n" +
+                      "Error:\n" + connTest.error + "\n\n" +
+                      "Upload aborted. Files are in:\n" + setup.timeFolderPath);
+                progressOverallLabel.text = "";
+                progressStatusText.text   = "Upload aborted — connection failed";
+                return;
+            }
+
+            progressOverallLabel.text = "Scanning rendered files...";
             panel.layout.layout(true);
 
             var timeFolderObj  = new Folder(setup.timeFolderPath);
@@ -1653,16 +1668,15 @@
             progressStatusText.text = "Connecting to FTP...";
             panel.layout.layout(true);
 
-            var testPort    = ftpConfig.port || "21";
-            var testUrl     = "ftp://" + ftpConfig.hostname + ":" + testPort + "/";
-            var testCommand = "curl -s -l --ssl-reqd -k --connect-timeout 10 --user " + ftpConfig.username + ":" + ftpConfig.password + " \"" + testUrl + "\"";
-            var testResult  = executeCommand(testCommand);
-
-            if (!testResult || testResult.length === 0) {
-                if (!confirm("FTP connection test returned no data.\nThis might indicate a connection issue.\n\nContinue anyway?")) {
-                    progressStatusText.text = "";
-                    return;
-                }
+            var connTest = testFTPConnection(ftpConfig);
+            if (!connTest.success) {
+                alert("FTP connection failed.\n\n" +
+                      "Host: " + ftpConfig.hostname + "\n" +
+                      "User: " + ftpConfig.username + "\n\n" +
+                      "Error:\n" + connTest.error + "\n\n" +
+                      "Sync aborted.");
+                progressStatusText.text = "Connection failed";
+                return;
             }
 
             var isInput       = ftpLocationDropdown.selection.index === 0;
