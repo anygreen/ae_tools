@@ -473,7 +473,8 @@
 
         try {
             var output = executeCommand(command);
-            if (getCurlError(output)) return false;
+            // curl -T produces no output on success; only check for errors if there IS output
+            if (output && output.length > 0 && getCurlError(output)) return false;
             return true;
         } catch (e) {
             return false;
