@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.0.1
+ * @version 2.0.2
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.0.1";
+    var SCRIPT_VERSION = "v2.0.2";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -695,6 +695,15 @@
     ec.margins       = [10, 12, 10, 10];
     ec.spacing       = 8;
 
+    // Project context (visible when on second tab)
+    var exportProjectInfo = ec.add("statictext", undefined, "No project selected");
+    exportProjectInfo.alignment = ["fill", "top"];
+    exportProjectInfo.graphics.foregroundColor = exportProjectInfo.graphics.newPen(
+        exportProjectInfo.graphics.PenType.SOLID_COLOR, [0.6, 0.6, 0.6], 1
+    );
+
+    ec.add("panel", undefined, undefined, {borderStyle: "sunken"}).alignment = ["fill", "top"];
+
     // Version Up
     var versionLabel = ec.add("statictext", undefined, "Version Up:");
     versionLabel.alignment = ["left", "top"];
@@ -890,6 +899,18 @@
         }
     }
 
+    function updateExportTabInfo() {
+        if (projectDropdown.selection) {
+            var text = currentProjects[projectDropdown.selection.index].name;
+            if (subProjectDropdown.enabled && subProjectDropdown.selection && subProjectDropdown.selection.index > 0) {
+                text += "  /  " + currentSubProjects[subProjectDropdown.selection.index - 1];
+            }
+            exportProjectInfo.text = text;
+        } else {
+            exportProjectInfo.text = "No project selected";
+        }
+    }
+
     function updateUIState() {
         if (!projectDropdown.selection) {
             disableSubProjectSection();
@@ -898,6 +919,7 @@
             currentMostRecentFile   = null;
             openFileBtn.enabled     = false;
             openFolderBtn.enabled   = false;
+            updateExportTabInfo();
             return;
         }
 
@@ -911,12 +933,14 @@
             disableSubProjectSection();
             openFileBtn.enabled   = false;
             openFolderBtn.enabled = false;
+            updateExportTabInfo();
             return;
         }
 
         updateSubProjects(projectPath);
         updateMostRecentFile();
         saveSetting("lastProject", currentProjects[projectIndex].name);
+        updateExportTabInfo();
     }
 
     // ============================================================
@@ -925,7 +949,7 @@
 
     projectDropdown.onChange = function() { updateUIState(); };
 
-    subProjectDropdown.onChange = function() { updateMostRecentFile(); };
+    subProjectDropdown.onChange = function() { updateMostRecentFile(); updateExportTabInfo(); };
 
     addProjectBtn.onClick = function() {
         var folder = Folder.selectDialog("Select Project Folder");
@@ -1210,12 +1234,168 @@
         }
     };
 
+    // ============================================================
+    // PROJECT MATCH CHECK
+    // ============================================================
+
+    /**
+     * Attempts to find a project (and sub-project) in the tool's list
+     * that matches the currently open AE project file.
+     * @returns {Object|null} { projectIndex, subProject } or null
+     */
+    function findMatchingProject() {
+        if (!app.project.file) return null;
+        var openPath = app.project.file.fsName.replace(/\\/g, "/");
+
+        for (var i = 0; i < currentProjects.length; i++) {
+            var pPath = currentProjects[i].path.replace(/\\/g, "/");
+            if (openPath.indexOf(pPath + "/") !== -1) {
+                var subProject = null;
+                var aeFolder = new Folder(currentProjects[i].path + "/" + AE_PATH_SEGMENT);
+                var subs = detectSubProjects(aeFolder);
+                var aeSegPos = openPath.indexOf(AE_PATH_SEGMENT);
+                for (var j = 0; j < subs.length; j++) {
+                    if (aeSegPos !== -1 && openPath.indexOf("/" + subs[j] + "/", aeSegPos) !== -1) {
+                        subProject = subs[j];
+                        break;
+                    }
+                }
+                return { projectIndex: i, subProject: subProject };
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Switches the tool's dropdowns to match a detected project.
+     */
+    function switchToDetectedProject(detected) {
+        projectDropdown.selection = detected.projectIndex;
+        updateUIState();
+        if (detected.subProject) {
+            for (var i = 0; i < subProjectDropdown.items.length; i++) {
+                if (subProjectDropdown.items[i].text === detected.subProject) {
+                    subProjectDropdown.selection = i;
+                    break;
+                }
+            }
+            updateMostRecentFile();
+            updateExportTabInfo();
+        }
+    }
+
+    /**
+     * Checks whether the open AE project matches the tool's selected project.
+     * Shows a dialog on mismatch with Cancel / Continue / Switch options.
+     * @returns {boolean} true to proceed, false to cancel
+     */
+    function checkProjectMatch() {
+        // No selection — let the caller handle validation
+        if (!projectDropdown.selection) return true;
+
+        var projectIndex = projectDropdown.selection.index;
+        var projectName  = currentProjects[projectIndex].name;
+        var projectPath  = currentProjects[projectIndex].path.replace(/\\/g, "/");
+
+        var selectedSubProject = null;
+        if (subProjectDropdown.enabled && subProjectDropdown.selection && subProjectDropdown.selection.index > 0) {
+            selectedSubProject = currentSubProjects[subProjectDropdown.selection.index - 1];
+        }
+
+        var toolLabel = projectName;
+        if (selectedSubProject) toolLabel += " / " + selectedSubProject;
+
+        // Case 1: no AE project file open
+        if (!app.project.file) {
+            var d1 = new Window("dialog", "No Project Open");
+            d1.orientation = "column";
+            d1.alignChildren = ["fill", "top"];
+            d1.spacing = 10;
+            d1.margins = 16;
+            d1.preferredSize.width = 400;
+
+            var m1 = d1.add("statictext", undefined,
+                "No AE project is currently open.\n\nTool selection:  " + toolLabel +
+                "\n\nContinue anyway?", {multiline: true});
+            m1.preferredSize = [380, 90];
+
+            var bg1 = d1.add("group");
+            bg1.orientation = "row";
+            bg1.alignment = ["center", "top"];
+            bg1.spacing = 10;
+            bg1.add("button", undefined, "Continue", {name: "ok"}).onClick  = function() { d1.close(1); };
+            bg1.add("button", undefined, "Cancel", {name: "cancel"}).onClick = function() { d1.close(0); };
+
+            return d1.show() === 1;
+        }
+
+        // Case 2: project is open — check for match
+        var openPath = app.project.file.fsName.replace(/\\/g, "/");
+        var pathMatch = (openPath.indexOf(projectPath + "/") !== -1);
+
+        var subProjectMatch = true;
+        if (pathMatch && selectedSubProject) {
+            var aeSegCheck = openPath.indexOf(AE_PATH_SEGMENT);
+            subProjectMatch = (aeSegCheck !== -1 && openPath.indexOf("/" + selectedSubProject + "/", aeSegCheck) !== -1);
+        }
+
+        if (pathMatch && subProjectMatch) return true;
+
+        // Mismatch — detect what the open file actually belongs to
+        var detected = findMatchingProject();
+
+        var msg = "The open AE project does not match the tool selection.\n\n";
+        msg += "Open project:  " + app.project.file.name + "\n";
+        msg += "Tool selection:  " + toolLabel + "\n";
+
+        if (detected) {
+            var detLabel = currentProjects[detected.projectIndex].name;
+            if (detected.subProject) detLabel += " / " + detected.subProject;
+            msg += "\nDetected match:  " + detLabel + "\n";
+        }
+
+        var d2 = new Window("dialog", "Project Mismatch");
+        d2.orientation = "column";
+        d2.alignChildren = ["fill", "top"];
+        d2.spacing = 10;
+        d2.margins = 16;
+        d2.preferredSize.width = 440;
+
+        var m2 = d2.add("statictext", undefined, msg, {multiline: true});
+        m2.preferredSize = [420, detected ? 120 : 100];
+
+        var bg2 = d2.add("group");
+        bg2.orientation = "row";
+        bg2.alignment = ["center", "top"];
+        bg2.spacing = 10;
+
+        if (detected) {
+            var switchBtn = bg2.add("button", undefined, "Switch Tool");
+            switchBtn.helpTip = "Switch the tool to match the open project";
+            switchBtn.onClick = function() { d2.close(2); };
+        }
+
+        bg2.add("button", undefined, "Continue").onClick = function() { d2.close(1); };
+        bg2.add("button", undefined, "Cancel", {name: "cancel"}).onClick = function() { d2.close(0); };
+
+        var result = d2.show();
+
+        if (result === 2 && detected) {
+            switchToDetectedProject(detected);
+            return true;
+        }
+
+        return result === 1;
+    }
+
     /**
      * Validates the render queue, creates date/time output folders, and updates
      * all queued output modules to point to the new folder.
      * @returns {Object|null} Setup result, or null if cancelled/failed
      */
     function setupRenderOutput() {
+        if (!checkProjectMatch()) return null;
+
         var renderQueue  = app.project.renderQueue;
         var activeItems  = [];
 
@@ -1457,6 +1637,7 @@
             panel.layout.layout(true);
 
             if (!projectDropdown.selection) { alert("Please select a project first."); return; }
+            if (!checkProjectMatch()) return;
 
             var projectIndex = projectDropdown.selection.index;
             var projectName  = currentProjects[projectIndex].name;
