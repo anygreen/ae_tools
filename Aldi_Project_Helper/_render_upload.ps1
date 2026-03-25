@@ -11,17 +11,18 @@ param(
 # SETUP
 # ============================================================
 
-# Ensure credentials are cleaned up on exit or interruption
+# Ensure credentials and temp files are cleaned up on exit or interruption
 $renderLogGlobal = $null
+$netrcFileGlobal = $null
+$curlProgressGlobal = $null
+$curlExitFileGlobal = $null
 Register-EngineEvent PowerShell.Exiting -Action {
-    if ($ConfigPath -and (Test-Path $ConfigPath -ErrorAction SilentlyContinue)) {
-        Remove-Item $ConfigPath -ErrorAction SilentlyContinue
-    }
-    if ($renderLogGlobal -and (Test-Path $renderLogGlobal -ErrorAction SilentlyContinue)) {
-        Remove-Item $renderLogGlobal -ErrorAction SilentlyContinue
-    }
-    if (Test-Path "$renderLogGlobal.err" -ErrorAction SilentlyContinue) {
-        Remove-Item "$renderLogGlobal.err" -ErrorAction SilentlyContinue
+    Write-Host "$([char]27)[?7h" -NoNewline 2>$null   # re-enable line wrapping
+    foreach ($f in @($ConfigPath, $renderLogGlobal, "$renderLogGlobal.err",
+                     $netrcFileGlobal, $curlProgressGlobal, $curlExitFileGlobal)) {
+        if ($f -and (Test-Path $f -ErrorAction SilentlyContinue)) {
+            Remove-Item $f -ErrorAction SilentlyContinue
+        }
     }
 } | Out-Null
 
@@ -143,6 +144,7 @@ $lastProcessedLine = 0
 $renderDisplayLines = 4 + $compCount
 
 function Draw-RenderProgress {
+    Write-Host "$ESC[?7l" -NoNewline   # disable line wrapping
     if (-not $script:firstRenderDraw) {
         Write-Host "$ESC[$($renderDisplayLines)A" -NoNewline
     }
@@ -178,6 +180,7 @@ function Draw-RenderProgress {
     }
 
     Write-Host "$CLR"
+    Write-Host "$ESC[?7h" -NoNewline   # re-enable line wrapping
 }
 
 function Parse-NewLines {
@@ -308,34 +311,60 @@ if ($doUpload) {
         exit 0
     }
 
-    $totalBytes   = ($files | Measure-Object -Property Length -Sum).Sum
-    $totalMB      = Format-MB $totalBytes
+    # Build per-file info arrays
+    $ufPaths  = @()
+    $ufRels   = @()
+    $ufSizes  = @()
+    $ufDisp   = @()   # truncated display names (max 30 chars)
+    $ufStatus = @()
+    $ufResultOk    = @()
+    $ufResultSpeed = @()
+    $ufResultTime  = @()
+
+    $totalBytes = [int64]0
+    foreach ($f in $files) {
+        $ufPaths  += $f.FullName
+        $rel = $f.FullName.Substring($outputFolder.Length + 1).Replace('\', '/')
+        $ufRels   += $rel
+        $ufSizes  += $f.Length
+        $bn = $f.Name
+        if ($bn.Length -gt 30) {
+            $ufDisp += "..." + $bn.Substring($bn.Length - 27)
+        } else {
+            $ufDisp += $bn
+        }
+        $ufStatus += 'waiting'
+        $ufResultOk    += ''
+        $ufResultSpeed += ''
+        $ufResultTime  += ''
+        $totalBytes += $f.Length
+    }
+
+    $totalMB       = Format-MB $totalBytes
     $uploadedBytes = [int64]0
     $uploadedCount = 0
     $uploadErrors  = 0
     $uploadStart   = Get-Date
     $firstUploadDraw = $true
-    $uploadDisplayLines = 5
 
-    function Draw-UploadProgress {
-        param([string]$CurrentFile)
+    # Display height: header(1) + blank(1) + files(N) + blank(1) + overall(1) + current(1) + blank(1)
+    $uploadDisplayLines = $fileCount + 6
 
-        if (-not $script:firstUploadDraw) {
-            Write-Host "$ESC[$($uploadDisplayLines)A" -NoNewline
-        }
-        $script:firstUploadDraw = $false
+    $curFileSize  = [int64]0
+    $curFileStart = Get-Date
+    $curFileIdx   = 0
+    $curFileShort = ""
 
-        $uploadedMB = Format-MB $script:uploadedBytes
-        $bar = Draw-Bar -Current $script:uploadedBytes -Max $totalBytes
+    # Netrc file for credentials
+    $netrcFile = [System.IO.Path]::GetTempFileName()
+    $netrcFileGlobal = $netrcFile
+    Set-Content -Path $netrcFile -Value "machine $ftpHost login $ftpUser password $ftpPass" -NoNewline
 
-        $fileIdx = $script:uploadedCount + $script:uploadErrors + 1
-
-        Write-Host "$CLR  ${BOLD}UPLOAD PROGRESS${RESET}"
-        Write-Host "$CLR  Overall: $bar  $uploadedMB / $totalMB MB"
-        Write-Host "$CLR"
-        Write-Host "$CLR  Uploading [$fileIdx/$fileCount]: $CurrentFile"
-        Write-Host "$CLR"
-    }
+    # Temp files for curl progress
+    $curlProgress = [System.IO.Path]::GetTempFileName()
+    $curlExitFile = [System.IO.Path]::GetTempFileName()
+    $curlProgressGlobal = $curlProgress
+    $curlExitFileGlobal = $curlExitFile
 
     function Get-FTPTimestamp {
         param([string]$FilePath)
@@ -343,60 +372,173 @@ if ($doUpload) {
         return $file.LastWriteTimeUtc.ToString("yyyyMMddHHmmss")
     }
 
-    foreach ($file in $files) {
-        $relPath    = $file.FullName.Substring($outputFolder.Length + 1).Replace('\', '/')
-        $remotePath = "$remoteBase/$relPath"
-        $fileName   = $file.Name
-        $fileSize   = $file.Length
-        $modTime    = Get-FTPTimestamp $file.FullName
+    function Parse-UploadPct {
+        if (-not (Test-Path $script:curlProgress) -or (Get-Item $script:curlProgress).Length -eq 0) {
+            return 0
+        }
+        $raw = Get-Content $script:curlProgress -Raw -ErrorAction SilentlyContinue
+        if (-not $raw) { return 0 }
+        # curl --progress-bar writes "###...  XX.X%" with \r between updates
+        $lines = $raw -split "`r"
+        for ($li = $lines.Count - 1; $li -ge 0; $li--) {
+            if ($lines[$li] -match '(\d+\.?\d*)\s*%') {
+                return [Math]::Min(100, [int][Math]::Floor([double]$matches[1]))
+            }
+        }
+        return 0
+    }
 
-        Draw-UploadProgress $relPath
+    function Draw-UploadProgress {
+        Write-Host "$ESC[?7l" -NoNewline   # disable line wrapping
+        if (-not $script:firstUploadDraw) {
+            Write-Host "$ESC[$($script:uploadDisplayLines)A" -NoNewline
+        }
+        $script:firstUploadDraw = $false
 
-        $url = "ftp://${ftpHost}:${ftpPort}/${remotePath}"
+        # Estimate bytes sent for current file from progress percentage
+        $curPct = Parse-UploadPct
+        $curBytes = [int64]($script:curFileSize * $curPct / 100)
+        $totalNow = $script:uploadedBytes + $curBytes
+
+        Write-Host "$CLR  ${BOLD}UPLOAD PROGRESS${RESET}"
+        Write-Host "$CLR"
+
+        # File list
+        for ($i = 0; $i -lt $script:fileCount; $i++) {
+            $name   = $ufDisp[$i]
+            $smb    = Format-MB $ufSizes[$i]
+            $status = $ufStatus[$i]
+
+            if ($status -eq 'done') {
+                $padName = $name.PadRight(30)
+                Write-Host "$CLR  ${GREEN}$([char]0x2713)${RESET} $padName $($smb.PadLeft(7)) MB  $($ufResultSpeed[$i].PadLeft(5)) MB/s  $($ufResultTime[$i])"
+            }
+            elseif ($status -eq 'error') {
+                $padName = $name.PadRight(30)
+                Write-Host "$CLR  ${RED}$([char]0x2717)${RESET} $padName $($smb.PadLeft(7)) MB  error"
+            }
+            elseif ($status -eq 'uploading') {
+                $padName = $name.PadRight(30)
+                Write-Host "$CLR  ${YELLOW}$([char]0x25B6)${RESET} $padName $($smb.PadLeft(7)) MB  uploading..."
+            }
+            else {
+                $padName = $name.PadRight(30)
+                Write-Host "$CLR  ${GRAY}$([char]0x00B7)${RESET} $padName $($smb.PadLeft(7)) MB  waiting"
+            }
+        }
+
+        Write-Host "$CLR"
+
+        # Overall progress bar
+        $upMB = Format-MB $totalNow
+        $elapsed = [int]((Get-Date) - $script:uploadStart).TotalSeconds
+        $speedStr = ""
+        if ($elapsed -gt 0 -and $totalNow -gt 0) {
+            $speedStr = "  $([Math]::Round($totalNow / $elapsed / 1MB, 1).ToString('0.0')) MB/s"
+        }
+        $bar = Draw-Bar -Current $totalNow -Max $script:totalBytes -Width 30
+        Write-Host "$CLR  Overall  $bar  $upMB / $($script:totalMB) MB$speedStr"
+
+        # Current file progress bar
+        $fileElapsed = [int]((Get-Date) - $script:curFileStart).TotalSeconds
+        $fileSpeed = ""
+        if ($fileElapsed -gt 0 -and $curBytes -gt 0) {
+            $fileSpeed = "$([Math]::Round($curBytes / $fileElapsed / 1MB, 1).ToString('0.0')) MB/s"
+        }
+        $fileBar = Draw-Bar -Current $curBytes -Max $script:curFileSize -Width 30
+        $fileIdx = "$($script:curFileIdx + 1)/$($script:fileCount)"
+        Write-Host "$CLR  [$fileIdx]   $fileBar  $($script:curFileShort.PadRight(16)) $fileSpeed"
+
+        Write-Host "$CLR"
+        Write-Host "$ESC[?7h" -NoNewline   # re-enable line wrapping
+    }
+
+    Write-Host ""
+
+    # Upload each file
+    for ($fi = 0; $fi -lt $fileCount; $fi++) {
+        $ufFile    = $ufPaths[$fi]
+        $ufRel     = $ufRels[$fi]
+        $ufRemote  = "$remoteBase/$ufRel"
+        $ufFname   = Split-Path $ufRemote -Leaf
+        $ufFsize   = $ufSizes[$fi]
+        $ufMtime   = Get-FTPTimestamp $ufFile
+
+        # Update status
+        $ufStatus[$fi] = 'uploading'
+
+        # Set current file info for draw_upload_progress
+        $curFileIdx   = $fi
+        $curFileSize  = $ufFsize
+        $curFileStart = Get-Date
+        $curFileShort = Split-Path $ufRel -Leaf
+        if ($curFileShort.Length -gt 16) {
+            $curFileShort = "..." + $curFileShort.Substring($curFileShort.Length - 13)
+        }
+
+        $url = "ftp://${ftpHost}:${ftpPort}/${ufRemote}"
 
         # Build curl arguments
-        # Use -sS (silent + show errors) to keep the ANSI progress display clean
-        $curlArgs = @('-sS')
+        $curlArgs = @('--progress-bar')
         if ($tlsFlags) {
             $curlArgs += $tlsFlags.Split(' ')
         }
-        $curlArgs += '--user', "${ftpUser}:${ftpPass}"
+        $curlArgs += '--netrc-file', $netrcFile
         $curlArgs += '--ftp-create-dirs'
-        $curlArgs += '-Q', "-*MFMT $modTime /$remotePath"
-        $curlArgs += '-Q', "-*MFMT $modTime $fileName"
-        $curlArgs += '-Q', "-*SITE UTIME $fileName $modTime $modTime $modTime UTC"
-        $curlArgs += '-T', $file.FullName
+        $curlArgs += '-Q', "-*MFMT $ufMtime /$ufRemote"
+        $curlArgs += '-Q', "-*MFMT $ufMtime $ufFname"
+        $curlArgs += '-Q', "-*SITE UTIME $ufFname $ufMtime $ufMtime $ufMtime UTC"
+        $curlArgs += '-T', $ufFile
         $curlArgs += $url
 
-        & curl @curlArgs 2>&1 | Out-Host
+        # Run curl in background, capturing progress output
+        "255" | Set-Content $curlExitFile
+        "" | Set-Content $curlProgress
 
-        if ($LASTEXITCODE -eq 0) {
-            $uploadedBytes += $fileSize
+        $curlProcess = Start-Process -FilePath 'curl' `
+            -ArgumentList $curlArgs `
+            -RedirectStandardError $curlProgress `
+            -NoNewWindow -PassThru
+
+        # Monitor with live progress
+        while (-not $curlProcess.HasExited) {
+            Draw-UploadProgress
+            Start-Sleep -Milliseconds 400
+        }
+
+        $curlExit = $curlProcess.ExitCode
+
+        $ufElapsed = [int]((Get-Date) - $curFileStart).TotalSeconds
+        if ($curlExit -eq 0) {
+            $uploadedBytes += $ufFsize
             $uploadedCount++
+            $ufStatus[$fi] = 'done'
+            $ufResultOk[$fi] = '1'
+            if ($ufElapsed -gt 0) {
+                $ufResultSpeed[$fi] = [Math]::Round($ufFsize / $ufElapsed / 1MB, 1).ToString('0.0')
+            } else {
+                $ufResultSpeed[$fi] = '--'
+            }
+            $ufResultTime[$fi] = Format-Time $ufElapsed
         } else {
             $uploadErrors++
+            $ufStatus[$fi] = 'error'
+            $ufResultOk[$fi] = '0'
+            $ufResultSpeed[$fi] = ''
+            $ufResultTime[$fi] = ''
         }
     }
 
-    # Final upload draw
-    $firstUploadDraw = $false
-    Write-Host "$ESC[$($uploadDisplayLines)A" -NoNewline
-
-    $uploadedMB = Format-MB $uploadedBytes
-    $bar = Draw-Bar -Current $uploadedBytes -Max $totalBytes
-
-    Write-Host "$CLR  ${BOLD}UPLOAD PROGRESS${RESET}"
-    Write-Host "$CLR  Overall: $bar  $uploadedMB / $totalMB MB"
-    Write-Host "$CLR"
-    if ($uploadErrors -gt 0) {
-        Write-Host "$CLR  ${RED}$uploadErrors file(s) failed to upload${RESET}"
-    } else {
-        Write-Host "$CLR  ${GREEN}All files uploaded successfully${RESET}"
-    }
-    Write-Host "$CLR"
+    # Final redraw with all files complete
+    Draw-UploadProgress
 
     $uploadEnd  = Get-Date
     $uploadTime = [int]($uploadEnd - $uploadStart).TotalSeconds
+
+    # Cleanup temp files
+    Remove-Item $netrcFile -ErrorAction SilentlyContinue
+    Remove-Item $curlProgress -ErrorAction SilentlyContinue
+    Remove-Item $curlExitFile -ErrorAction SilentlyContinue
 }
 
 # ============================================================
@@ -412,7 +554,11 @@ Write-Host "  $sep"
 Write-Host "  ${BOLD}${GREEN}COMPLETE${RESET}"
 Write-Host "  Rendered: $compCount composition(s) ($totalFrames frames) in $(Format-Time $renderTime)"
 if ($doUpload) {
-    Write-Host "  Uploaded: $uploadedCount/$fileCount files ($(Format-MB $uploadedBytes) MB) in $(Format-Time $uploadTime)"
+    $avgSpeed = ""
+    if ($uploadTime -gt 0) {
+        $avgSpeed = " ($([Math]::Round($uploadedBytes / $uploadTime / 1MB, 1).ToString('0.0')) MB/s)"
+    }
+    Write-Host "  Uploaded: $uploadedCount/$fileCount files ($(Format-MB $uploadedBytes) MB) in $(Format-Time $uploadTime)$avgSpeed"
     if ($uploadErrors -gt 0) {
         Write-Host "  ${RED}Errors:  $uploadErrors file(s) failed${RESET}"
     }
