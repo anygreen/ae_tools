@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.18";
+    var SCRIPT_VERSION = "v2.2.19";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";

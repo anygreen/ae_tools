@@ -258,17 +258,19 @@ for (( r=0; r<SCAN_ROOT_COUNT; r++ )); do
     fi
 
     # Combine and deduplicate date folders, take latest N
-    declare -A date_seen
-    combined_dates=()
+    combined_dates_str=""
     for d in "${local_dates[@]}" "${remote_dates[@]}"; do
-        if [ -z "${date_seen[$d]+x}" ]; then
-            date_seen[$d]=1
-            combined_dates+=("$d")
+        # Check if already in combined list
+        if [ -z "$combined_dates_str" ] || ! echo "$combined_dates_str" | grep -qxF "$d"; then
+            combined_dates_str="${combined_dates_str}${combined_dates_str:+$'\n'}$d"
         fi
     done
-    unset date_seen
-    IFS=$'\n' combined_dates=($(sort -r <<< "${combined_dates[*]}")); unset IFS
-    combined_dates=("${combined_dates[@]:0:$FOLDER_COUNT}")
+    combined_dates=()
+    if [ -n "$combined_dates_str" ]; then
+        while IFS= read -r d; do
+            [ -n "$d" ] && combined_dates+=("$d")
+        done <<< "$(echo "$combined_dates_str" | sort -r | head -n "$FOLDER_COUNT")"
+    fi
 
     for date_folder in "${combined_dates[@]}"; do
         printf "  Scanning %s/%s...${CLR}\r" "$label" "$date_folder"
@@ -276,45 +278,41 @@ for (( r=0; r<SCAN_ROOT_COUNT; r++ )); do
         local_date_path="$local_base/$date_folder"
         remote_date_path="$remote_base/$date_folder"
 
-        # Scan local files
-        declare -A local_map
+        # Scan local files (newline-delimited set)
+        local_set=""
         if [ -d "$local_date_path" ]; then
-            while IFS= read -r relpath; do
-                [ -n "$relpath" ] && local_map["$relpath"]=1
-            done < <(local_list_recursive "$local_date_path")
+            local_set=$(local_list_recursive "$local_date_path")
         fi
 
-        # Scan remote files
-        declare -A remote_map
-        remote_files=$(ftp_list_recursive "$remote_date_path" "")
-        if [ -n "$remote_files" ]; then
+        # Scan remote files (newline-delimited set)
+        remote_set=$(ftp_list_recursive "$remote_date_path" "")
+
+        # Compare: local only → upload
+        if [ -n "$local_set" ]; then
             while IFS= read -r relpath; do
-                [ -n "$relpath" ] && remote_map["$relpath"]=1
-            done <<< "$remote_files"
+                [ -z "$relpath" ] && continue
+                if [ -z "$remote_set" ] || ! echo "$remote_set" | grep -qxF "$relpath"; then
+                    full_local="$local_date_path/$relpath"
+                    full_remote="$remote_date_path/$relpath"
+                    fsize=0
+                    [ -f "$full_local" ] && fsize=$(stat -f%z "$full_local" 2>/dev/null || echo 0)
+                    ALL_UPLOADS+=("$label|$date_folder|$relpath|$full_local|$full_remote|$fsize")
+                    TOTAL_UPLOAD_BYTES=$((TOTAL_UPLOAD_BYTES + fsize))
+                fi
+            done <<< "$local_set"
         fi
 
-        # Compare: local only → upload, remote only → download
-        for relpath in "${!local_map[@]}"; do
-            if [ -z "${remote_map[$relpath]+x}" ]; then
-                full_local="$local_date_path/$relpath"
-                full_remote="$remote_date_path/$relpath"
-                fsize=0
-                [ -f "$full_local" ] && fsize=$(stat -f%z "$full_local" 2>/dev/null || echo 0)
-                ALL_UPLOADS+=("$label|$date_folder|$relpath|$full_local|$full_remote|$fsize")
-                TOTAL_UPLOAD_BYTES=$((TOTAL_UPLOAD_BYTES + fsize))
-            fi
-        done
-
-        for relpath in "${!remote_map[@]}"; do
-            if [ -z "${local_map[$relpath]+x}" ]; then
-                full_local="$local_date_path/$relpath"
-                full_remote="$remote_date_path/$relpath"
-                ALL_DOWNLOADS+=("$label|$date_folder|$relpath|$full_local|$full_remote|0")
-            fi
-        done
-
-        unset local_map
-        unset remote_map
+        # Compare: remote only → download
+        if [ -n "$remote_set" ]; then
+            while IFS= read -r relpath; do
+                [ -z "$relpath" ] && continue
+                if [ -z "$local_set" ] || ! echo "$local_set" | grep -qxF "$relpath"; then
+                    full_local="$local_date_path/$relpath"
+                    full_remote="$remote_date_path/$relpath"
+                    ALL_DOWNLOADS+=("$label|$date_folder|$relpath|$full_local|$full_remote|0")
+                fi
+            done <<< "$remote_set"
+        fi
     done
 done
 
