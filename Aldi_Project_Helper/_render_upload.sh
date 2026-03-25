@@ -40,7 +40,8 @@ COMP_STATUS=()
 # Ensure credentials are cleaned up on exit, interrupt, or terminal close
 cleanup() {
     [ -n "$CURL_PID" ] && kill "$CURL_PID" 2>/dev/null
-    rm -f "$CONFIG_FILE" "$RENDER_LOG" "$FILE_LIST" "$NETRC_FILE" "$CURL_STDOUT" 2>/dev/null
+    rm -f "$CONFIG_FILE" "$RENDER_LOG" "$FILE_LIST" "$NETRC_FILE" \
+          "$CURL_PROGRESS" "$CURL_EXIT_FILE" "$CURL_CMD" 2>/dev/null
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -88,13 +89,14 @@ BAR_WIDTH=40
 draw_bar() {
     local current=$1
     local max=$2
+    local width=${3:-$BAR_WIDTH}
     local pct=0
     if [ "$max" -gt 0 ]; then
         pct=$((current * 100 / max))
     fi
     [ "$pct" -gt 100 ] && pct=100
-    local filled=$((pct * BAR_WIDTH / 100))
-    local empty=$((BAR_WIDTH - filled))
+    local filled=$((pct * width / 100))
+    local empty=$((width - filled))
     local bar=""
     local j
     for ((j=0; j<filled; j++)); do bar="${bar}█"; done
@@ -300,20 +302,24 @@ if [ "$DO_UPLOAD" = "1" ]; then
     UF_PATHS=()
     UF_RELS=()
     UF_SIZES=()
-    UF_STATUS=()     # waiting | uploading | done | error
-    UF_SPEED_MB=()   # "12.3" after completion
-    UF_TIME_STR=()   # "1.2s" after completion
+    UF_DISP=()        # truncated display names (max 30 chars)
+    UF_RESULT_OK=()    # "1" or "0" after upload
+    UF_RESULT_SPEED=() # "2.3" after upload
+    UF_RESULT_TIME=()  # "35s" after upload
 
     TOTAL_BYTES=0
     uf_idx=0
     while IFS= read -r uf_line; do
         uf_sz=$(stat -f%z "$uf_line" 2>/dev/null || echo 0)
+        uf_bn=$(basename "$uf_line")
         UF_PATHS[$uf_idx]="$uf_line"
         UF_RELS[$uf_idx]="${uf_line#$OUTPUT_FOLDER/}"
         UF_SIZES[$uf_idx]=$uf_sz
-        UF_STATUS[$uf_idx]="waiting"
-        UF_SPEED_MB[$uf_idx]=""
-        UF_TIME_STR[$uf_idx]=""
+        if [ ${#uf_bn} -gt 30 ]; then
+            UF_DISP[$uf_idx]="...${uf_bn: -27}"
+        else
+            UF_DISP[$uf_idx]="$uf_bn"
+        fi
         TOTAL_BYTES=$((TOTAL_BYTES + uf_sz))
         uf_idx=$((uf_idx + 1))
     done < "$FILE_LIST"
@@ -323,61 +329,6 @@ if [ "$DO_UPLOAD" = "1" ]; then
     UPLOADED_COUNT=0
     UPLOAD_ERRORS=0
     UPLOAD_START=$(date +%s)
-    FIRST_UPLOAD_DRAW=1
-    CURRENT_UF_START=0
-
-    # Display height: header(1) + overall(1) + blank(1) + files(N) + blank(1)
-    UPLOAD_DISPLAY_LINES=$((4 + FILE_COUNT))
-
-    format_curl_time() {
-        # Format float seconds from curl -w into human-readable string
-        awk -v t="${1:-0}" 'BEGIN { t+=0; if (t<60) printf "%.1fs", t; else printf "%dm %ds", int(t/60), int(t)%60 }'
-    }
-
-    draw_upload_progress() {
-        if [ "$FIRST_UPLOAD_DRAW" = "0" ]; then
-            printf "\033[${UPLOAD_DISPLAY_LINES}A"
-        fi
-        FIRST_UPLOAD_DRAW=0
-
-        local uploaded_mb
-        uploaded_mb=$(format_mb $UPLOADED_BYTES)
-        local elapsed=$(($(date +%s) - UPLOAD_START))
-        local speed_str=""
-        if [ "$elapsed" -gt 0 ] && [ "$UPLOADED_BYTES" -gt 0 ]; then
-            speed_str="  •  $(awk -v b="$UPLOADED_BYTES" -v t="$elapsed" 'BEGIN { printf "%.1f", b / t / 1048576 }') MB/s"
-        fi
-
-        printf "${CLR}  ${BOLD}UPLOAD PROGRESS${RESET}\n"
-        printf "${CLR}  Overall: "
-        draw_bar "$UPLOADED_BYTES" "$TOTAL_BYTES"
-        printf "  %s / %s MB%s\n" "$uploaded_mb" "$TOTAL_MB" "$speed_str"
-        printf "${CLR}\n"
-
-        local i
-        for ((i=0; i<FILE_COUNT; i++)); do
-            local st="${UF_STATUS[$i]}"
-            local name
-            name=$(basename "${UF_RELS[$i]}")
-            local smb
-            smb=$(format_mb ${UF_SIZES[$i]})
-
-            if [ "$st" = "done" ]; then
-                printf "${CLR}  ${GREEN}✓${RESET} %-45s %7s MB  %6s MB/s  %s\n" \
-                    "$name" "$smb" "${UF_SPEED_MB[$i]}" "${UF_TIME_STR[$i]}"
-            elif [ "$st" = "uploading" ]; then
-                local uf_elapsed=$(($(date +%s) - CURRENT_UF_START))
-                printf "${CLR}  ${YELLOW}▶${RESET} %-45s %7s MB  uploading... %s\n" \
-                    "$name" "$smb" "$(format_time $uf_elapsed)"
-            elif [ "$st" = "error" ]; then
-                printf "${CLR}  ${RED}✗${RESET} %-45s %7s MB  error\n" "$name" "$smb"
-            else
-                printf "${CLR}  ${GRAY}·${RESET} %-45s %7s MB\n" "$name" "$smb"
-            fi
-        done
-
-        printf "${CLR}\n"
-    }
 
     get_ftp_timestamp() {
         local file="$1"
@@ -386,15 +337,93 @@ if [ "$DO_UPLOAD" = "1" ]; then
         date -u -r "$mtime" "+%Y%m%d%H%M%S"
     }
 
-    # Create netrc file for secure credential passing (avoids shell escaping issues)
+    parse_upload_pct() {
+        # Parse percentage from curl --progress-bar output captured by script.
+        # curl writes: "###...  XX.X%" with \r between updates.
+        [ ! -s "$CURL_PROGRESS" ] && echo "0" && return
+        local pct
+        pct=$(tail -c 500 "$CURL_PROGRESS" 2>/dev/null | \
+            tr '\r' '\n' | \
+            grep -oE '[0-9]+\.[0-9]' | \
+            tail -1)
+        if [ -n "$pct" ]; then
+            printf "%.0f" "$pct" 2>/dev/null || echo "0"
+        else
+            echo "0"
+        fi
+    }
+
+    # Create temp files
     NETRC_FILE=$(mktemp /tmp/ae_netrc_XXXXXX)
     chmod 600 "$NETRC_FILE"
     printf "machine %s login %s password %s\n" "$FTP_HOST" "$FTP_USER" "$FTP_PASS" > "$NETRC_FILE"
 
-    CURL_STDOUT=$(mktemp /tmp/ae_curl_out_XXXXXX)
+    CURL_PROGRESS=$(mktemp /tmp/ae_curl_prog_XXXXXX)
+    CURL_EXIT_FILE=$(mktemp /tmp/ae_curl_exit_XXXXXX)
+    CURL_CMD=$(mktemp /tmp/ae_curl_cmd_XXXXXX.sh)
+    chmod +x "$CURL_CMD"
 
-    # Initial draw
-    draw_upload_progress
+    # Print upload header (static, never redrawn)
+    printf "\n  ${BOLD}UPLOAD PROGRESS${RESET}\n\n"
+
+    # Growing display: only the bottom 2 lines are ever redrawn via cursor-up 2.
+    # Completed file results are printed once above and never touched again.
+    # This avoids the line-wrapping bug that breaks cursor-up with large N.
+    FIRST_UPLOAD_DRAW=1
+    CUR_FILE_SIZE=0
+    CUR_FILE_START=0
+    CUR_FILE_IDX=0
+    CUR_FILE_SHORT=""
+
+    draw_upload_bars() {
+        if [ "$FIRST_UPLOAD_DRAW" = "0" ]; then
+            printf "\033[2A"
+        fi
+        FIRST_UPLOAD_DRAW=0
+
+        # Estimate bytes sent for current file from progress percentage
+        local cur_pct
+        cur_pct=$(parse_upload_pct)
+        local cur_bytes=$((CUR_FILE_SIZE * cur_pct / 100))
+        local total_now=$((UPLOADED_BYTES + cur_bytes))
+
+        # Line 1: Overall progress
+        local up_mb
+        up_mb=$(format_mb $total_now)
+        local elapsed=$(($(date +%s) - UPLOAD_START))
+        local speed_str=""
+        if [ "$elapsed" -gt 0 ] && [ "$total_now" -gt 0 ]; then
+            speed_str="  $(awk -v b="$total_now" -v t="$elapsed" \
+                'BEGIN { printf "%.1f", b / t / 1048576 }') MB/s"
+        fi
+        printf "${CLR}  Overall  "
+        draw_bar "$total_now" "$TOTAL_BYTES" 30
+        printf "  %s/%s MB%s\n" "$up_mb" "$TOTAL_MB" "$speed_str"
+
+        # Line 2: Current file progress bar + live speed
+        local file_elapsed=$(($(date +%s) - CUR_FILE_START))
+        local file_speed=""
+        if [ "$file_elapsed" -gt 0 ] && [ "$cur_bytes" -gt 0 ]; then
+            file_speed="$(awk -v b="$cur_bytes" -v t="$file_elapsed" \
+                'BEGIN { printf "%.1f", b / t / 1048576 }') MB/s"
+        fi
+        printf "${CLR}  [%d/%d]   " "$((CUR_FILE_IDX + 1))" "$FILE_COUNT"
+        draw_bar "$cur_bytes" "$CUR_FILE_SIZE" 30
+        printf "  %-16s %s\n" "$CUR_FILE_SHORT" "$file_speed"
+    }
+
+    print_result_line() {
+        local idx=$1
+        local name="${UF_DISP[$idx]}"
+        local smb
+        smb=$(format_mb ${UF_SIZES[$idx]})
+        if [ "${UF_RESULT_OK[$idx]}" = "1" ]; then
+            printf "${CLR}  ${GREEN}✓${RESET} %-30s %7s MB  %5s MB/s  %s\n" \
+                "$name" "$smb" "${UF_RESULT_SPEED[$idx]}" "${UF_RESULT_TIME[$idx]}"
+        else
+            printf "${CLR}  ${RED}✗${RESET} %-30s %7s MB  error\n" "$name" "$smb"
+        fi
+    }
 
     # Upload each file
     for ((fi=0; fi<FILE_COUNT; fi++)); do
@@ -405,59 +434,99 @@ if [ "$DO_UPLOAD" = "1" ]; then
         uf_fsize=${UF_SIZES[$fi]}
         uf_mtime=$(get_ftp_timestamp "$uf_file")
 
-        UF_STATUS[$fi]="uploading"
-        CURRENT_UF_START=$(date +%s)
-        draw_upload_progress
-
-        uf_url="ftp://${FTP_HOST}:${FTP_PORT}/${uf_remote}"
-
-        # Upload in background with -w for post-transfer stats
-        : > "$CURL_STDOUT"
-        # shellcheck disable=SC2086
-        curl -sS $TLS_FLAGS \
-            --netrc-file "$NETRC_FILE" \
-            --ftp-create-dirs \
-            -Q "-*MFMT ${uf_mtime} /${uf_remote}" \
-            -Q "-*MFMT ${uf_mtime} ${uf_fname}" \
-            -Q "-*SITE UTIME ${uf_fname} ${uf_mtime} ${uf_mtime} ${uf_mtime} UTC" \
-            -T "$uf_file" \
-            -w '\n%{speed_upload} %{time_total}' \
-            "$uf_url" > "$CURL_STDOUT" 2>&1 &
-        CURL_PID=$!
-
-        # Monitor while uploading
-        while kill -0 "$CURL_PID" 2>/dev/null; do
-            draw_upload_progress
-            sleep 0.4
-        done
-
-        wait "$CURL_PID"
-        curl_exit=$?
-        CURL_PID=""
-
-        if [ "$curl_exit" -eq 0 ]; then
-            UPLOADED_BYTES=$((UPLOADED_BYTES + uf_fsize))
-            UPLOADED_COUNT=$((UPLOADED_COUNT + 1))
-            UF_STATUS[$fi]="done"
-            # Parse -w output (last line): "speed_bytes time_secs"
-            uf_stats=$(tail -1 "$CURL_STDOUT")
-            uf_speed_bytes=$(echo "$uf_stats" | awk '{print $1}')
-            UF_SPEED_MB[$fi]=$(awk -v s="${uf_speed_bytes:-0}" 'BEGIN { printf "%.1f", s / 1048576 }')
-            uf_time_secs=$(echo "$uf_stats" | awk '{print $2}')
-            UF_TIME_STR[$fi]=$(format_curl_time "$uf_time_secs")
-        else
-            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
-            UF_STATUS[$fi]="error"
+        # Commit previous file's result line above the 2 updating lines
+        if [ $fi -gt 0 ]; then
+            printf "\033[2A"
+            print_result_line $((fi - 1))
+            FIRST_UPLOAD_DRAW=1
         fi
 
-        draw_upload_progress
+        # Set current file info for draw_upload_bars
+        CUR_FILE_IDX=$fi
+        CUR_FILE_SIZE=$uf_fsize
+        CUR_FILE_START=$(date +%s)
+        CUR_FILE_SHORT=$(basename "$uf_rel")
+        if [ ${#CUR_FILE_SHORT} -gt 16 ]; then
+            CUR_FILE_SHORT="...${CUR_FILE_SHORT: -13}"
+        fi
+
+        # Generate curl command script (heredoc expands vars at write time)
+        uf_url="ftp://${FTP_HOST}:${FTP_PORT}/${uf_remote}"
+        echo "255" > "$CURL_EXIT_FILE"
+        cat > "$CURL_CMD" << CURLEOF
+#!/bin/bash
+curl --progress-bar $TLS_FLAGS \
+    --netrc-file "$NETRC_FILE" \
+    --ftp-create-dirs \
+    -Q "-*MFMT ${uf_mtime} /${uf_remote}" \
+    -Q "-*MFMT ${uf_mtime} ${uf_fname}" \
+    -Q "-*SITE UTIME ${uf_fname} ${uf_mtime} ${uf_mtime} ${uf_mtime} UTC" \
+    -T "$uf_file" \
+    "$uf_url"
+echo \$? > "$CURL_EXIT_FILE"
+CURLEOF
+
+        # Run curl via script to capture progress from pseudo-TTY
+        : > "$CURL_PROGRESS"
+        script -q "$CURL_PROGRESS" "$CURL_CMD" > /dev/null 2>&1 &
+        CURL_PID=$!
+
+        # Monitor with live progress
+        while kill -0 "$CURL_PID" 2>/dev/null; do
+            draw_upload_bars
+            sleep 0.4
+        done
+        wait "$CURL_PID" 2>/dev/null
+        CURL_PID=""
+
+        # Get exit code from file (script doesn't propagate reliably)
+        curl_exit=$(cat "$CURL_EXIT_FILE" 2>/dev/null)
+        curl_exit=${curl_exit:-255}
+
+        uf_elapsed=$(( $(date +%s) - CUR_FILE_START ))
+        if [ "$curl_exit" = "0" ]; then
+            UPLOADED_BYTES=$((UPLOADED_BYTES + uf_fsize))
+            UPLOADED_COUNT=$((UPLOADED_COUNT + 1))
+            UF_RESULT_OK[$fi]="1"
+            if [ "$uf_elapsed" -gt 0 ]; then
+                UF_RESULT_SPEED[$fi]=$(awk -v s="$uf_fsize" -v t="$uf_elapsed" \
+                    'BEGIN { printf "%.1f", s / t / 1048576 }')
+            else
+                UF_RESULT_SPEED[$fi]="--"
+            fi
+            UF_RESULT_TIME[$fi]=$(format_time $uf_elapsed)
+        else
+            UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+            UF_RESULT_OK[$fi]="0"
+        fi
     done
+
+    # Commit last file result and show final overall
+    if [ "$FILE_COUNT" -gt 0 ]; then
+        printf "\033[2A"
+        print_result_line $((FILE_COUNT - 1))
+
+        # Final overall bar
+        up_mb=$(format_mb $UPLOADED_BYTES)
+        elapsed=$(($(date +%s) - UPLOAD_START))
+        speed_str=""
+        if [ "$elapsed" -gt 0 ] && [ "$UPLOADED_BYTES" -gt 0 ]; then
+            speed_str="  $(awk -v b="$UPLOADED_BYTES" -v t="$elapsed" \
+                'BEGIN { printf "%.1f", b / t / 1048576 }') MB/s"
+        fi
+        printf "${CLR}  Overall  "
+        draw_bar "$UPLOADED_BYTES" "$TOTAL_BYTES" 30
+        printf "  %s/%s MB%s\n" "$up_mb" "$TOTAL_MB" "$speed_str"
+    fi
+    printf "\n"
 
     UPLOAD_END=$(date +%s)
     UPLOAD_TIME=$((UPLOAD_END - UPLOAD_START))
 
-    rm -f "$FILE_LIST" "$CURL_STDOUT"
-    CURL_STDOUT=""
+    rm -f "$FILE_LIST" "$CURL_PROGRESS" "$CURL_EXIT_FILE" "$CURL_CMD"
+    CURL_PROGRESS=""
+    CURL_EXIT_FILE=""
+    CURL_CMD=""
 fi
 
 # ============================================================
