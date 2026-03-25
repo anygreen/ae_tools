@@ -485,9 +485,24 @@ curl --progress-bar $TLS_FLAGS \
 echo \$? > "$CURL_EXIT_FILE"
 CURLEOF
 
-        # Run curl via script to capture progress from pseudo-TTY
+        # Run curl in a pseudo-TTY via expect (captures progress without
+        # leaking to terminal — macOS script writes to /dev/tty directly)
         : > "$CURL_PROGRESS"
-        script -q "$CURL_PROGRESS" "$CURL_CMD" > /dev/null 2>&1 &
+        expect > /dev/null 2>&1 << EXPECTEOF &
+log_user 0
+set timeout -1
+spawn -noecho bash "$CURL_CMD"
+set fp [open "$CURL_PROGRESS" w]
+expect {
+    -re ".+" {
+        puts -nonewline \$fp \$expect_out(buffer)
+        flush \$fp
+        exp_continue
+    }
+    eof
+}
+close \$fp
+EXPECTEOF
         CURL_PID=$!
 
         # Monitor with live progress
