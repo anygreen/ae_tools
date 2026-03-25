@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.2.7
+ * @version 2.2.8
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.7";
+    var SCRIPT_VERSION = "v2.2.8";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";

@@ -602,7 +602,9 @@
      */
     function generateRenderConfig(setup, ftpConfig) {
         var timestamp = new Date().getTime();
-        var tempDir = Folder.temp.fsName;
+        // On Mac, Folder.temp points to a sandbox-protected TemporaryItems directory
+        // that Terminal/bash cannot read. Use /tmp instead which is universally accessible.
+        var tempDir = IS_MAC ? "/tmp" : Folder.temp.fsName;
         var sep = IS_MAC ? "/" : "\\";
         var configPath = tempDir + sep + "ae_render_config_" + timestamp + ".txt";
 
