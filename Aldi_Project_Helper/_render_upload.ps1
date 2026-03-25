@@ -481,25 +481,24 @@ if ($doUpload) {
 
         $url = "ftp://${ftpHost}:${ftpPort}/${ufRemote}"
 
-        # Build curl arguments
-        $curlArgs = @('--progress-bar')
-        if ($tlsFlags) {
-            $curlArgs += $tlsFlags.Split(' ')
-        }
-        $curlArgs += '--netrc-file', $netrcFile
-        $curlArgs += '--ftp-create-dirs'
-        $curlArgs += '-Q', "-*MFMT $ufMtime /$ufRemote"
-        $curlArgs += '-Q', "-*MFMT $ufMtime $ufFname"
-        $curlArgs += '-Q', "-*SITE UTIME $ufFname $ufMtime $ufMtime $ufMtime UTC"
-        $curlArgs += '-T', $ufFile
-        $curlArgs += $url
+        # Build curl argument string with proper quoting.
+        # Start-Process -ArgumentList joins arrays with spaces, which breaks
+        # -Q values that contain spaces. Use a single pre-quoted string instead.
+        $argString = '--progress-bar'
+        if ($tlsFlags) { $argString += " $tlsFlags" }
+        $argString += " --netrc-file `"$netrcFile`""
+        $argString += ' --ftp-create-dirs'
+        $argString += " -Q `"-*MFMT $ufMtime /$ufRemote`""
+        $argString += " -Q `"-*MFMT $ufMtime $ufFname`""
+        $argString += " -Q `"-*SITE UTIME $ufFname $ufMtime $ufMtime $ufMtime UTC`""
+        $argString += " -T `"$ufFile`""
+        $argString += " `"$url`""
 
-        # Run curl in background, capturing progress output
-        "255" | Set-Content $curlExitFile
+        # Run curl in background, capturing progress (stderr) to file
         "" | Set-Content $curlProgress
 
         $curlProcess = Start-Process -FilePath 'curl' `
-            -ArgumentList $curlArgs `
+            -ArgumentList $argString `
             -RedirectStandardError $curlProgress `
             -NoNewWindow -PassThru
 
