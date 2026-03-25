@@ -12,8 +12,11 @@ param(
 # ============================================================
 
 $netrcFileGlobal = $null
+$curlProgressGlobal = $null
+$curlExitFileGlobal = $null
 Register-EngineEvent PowerShell.Exiting -Action {
-    foreach ($f in @($ConfigPath, $netrcFileGlobal)) {
+    Write-Host "$([char]27)[?7h" -NoNewline 2>$null   # re-enable line wrapping
+    foreach ($f in @($ConfigPath, $netrcFileGlobal, $curlProgressGlobal, $curlExitFileGlobal)) {
         if ($f -and (Test-Path $f -ErrorAction SilentlyContinue)) {
             Remove-Item $f -ErrorAction SilentlyContinue
         }
@@ -31,6 +34,23 @@ $GRAY   = "$ESC[90m"
 $BOLD   = "$ESC[1m"
 $RESET  = "$ESC[0m"
 $CLR    = "$ESC[K"
+
+$BAR_WIDTH = 40
+
+function Draw-Bar {
+    param([int64]$Current, [int64]$Max, [int]$Width = $BAR_WIDTH)
+    $pct = if ($Max -gt 0) { [Math]::Min(100, [Math]::Floor($Current * 100 / $Max)) } else { 0 }
+    $filled = [Math]::Floor($pct * $Width / 100)
+    $empty = $Width - $filled
+    $filledStr = [string]([char]0x2588) * $filled
+    $emptyStr  = [string]([char]0x2591) * $empty
+    return "[$filledStr$emptyStr] $($pct.ToString().PadLeft(3))%"
+}
+
+function Format-MB {
+    param([int64]$Bytes)
+    return ([Math]::Round($Bytes / 1MB, 1)).ToString("0.0")
+}
 
 # ============================================================
 # CONFIG PARSING
@@ -353,27 +373,176 @@ if ($confirm -match '^[nN]') {
 }
 
 # ============================================================
-# TRANSFER
+# TRANSFER — with live progress display
 # ============================================================
 
-Write-Host ""
-$processed = 0
+# Build unified file list: uploads first, then downloads
+$sfDisp    = @()   # display name
+$sfSize    = @()   # file size (0 for downloads)
+$sfDir     = @()   # "up" or "down"
+$sfStatus  = @()   # waiting/active/done/error
+$sfSpeed   = @()   # result speed string
+$sfTime    = @()   # result time string
+
+foreach ($entry in $allUploads) {
+    if ($scanRootCount -gt 1) {
+        $dname = "$($entry.label)/$($entry.dateFolder)/$($entry.relPath)"
+    } else {
+        $dname = "$($entry.dateFolder)/$($entry.relPath)"
+    }
+    if ($dname.Length -gt 30) { $dname = "..." + $dname.Substring($dname.Length - 27) }
+    $sfDisp   += $dname
+    $sfSize   += [int64]$entry.size
+    $sfDir    += "up"
+    $sfStatus += "waiting"
+    $sfSpeed  += ""
+    $sfTime   += ""
+}
+
+foreach ($entry in $allDownloads) {
+    if ($scanRootCount -gt 1) {
+        $dname = "$($entry.label)/$($entry.dateFolder)/$($entry.relPath)"
+    } else {
+        $dname = "$($entry.dateFolder)/$($entry.relPath)"
+    }
+    if ($dname.Length -gt 30) { $dname = "..." + $dname.Substring($dname.Length - 27) }
+    $sfDisp   += $dname
+    $sfSize   += [int64]0
+    $sfDir    += "down"
+    $sfStatus += "waiting"
+    $sfSpeed  += ""
+    $sfTime   += ""
+}
+
+$totalBytes = [int64]0
+foreach ($entry in $allUploads) { $totalBytes += [int64]$entry.size }
+$totalMB = Format-MB $totalBytes
+
+$uploadedBytes = [int64]0
 $uploadErrors = 0
 $downloadErrors = 0
 $transferStart = Get-Date
 
-# Uploads
-foreach ($entry in $allUploads) {
-    $processed++
-    if ($scanRootCount -gt 1) {
-        $display = "$($entry.label)/$($entry.dateFolder)/$($entry.relPath)"
-    } else {
-        $display = "$($entry.dateFolder)/$($entry.relPath)"
+$curFileSize  = [int64]0
+$curFileStart = Get-Date
+$curFileIdx   = 0
+$curFileShort = ""
+
+# Display height: header(1) + blank(1) + files(N) + blank(1) + overall(1) + current(1) + blank(1)
+$syncDisplayLines = $totalCount + 6
+$firstSyncDraw = $true
+
+# Temp files for curl progress capture
+$curlProgress = [System.IO.Path]::GetTempFileName()
+$curlExitFile = [System.IO.Path]::GetTempFileName()
+$curlProgressGlobal = $curlProgress
+$curlExitFileGlobal = $curlExitFile
+
+function Parse-SyncPct {
+    if (-not (Test-Path $script:curlProgress) -or (Get-Item $script:curlProgress).Length -eq 0) {
+        return 0
+    }
+    $raw = Get-Content $script:curlProgress -Raw -ErrorAction SilentlyContinue
+    if (-not $raw) { return 0 }
+    $lines = $raw -split "`r"
+    for ($li = $lines.Count - 1; $li -ge 0; $li--) {
+        if ($lines[$li] -match '(\d+\.?\d*)\s*%') {
+            return [Math]::Min(100, [int][Math]::Floor([double]$matches[1]))
+        }
+    }
+    return 0
+}
+
+function Draw-SyncProgress {
+    Write-Host "$ESC[?7l" -NoNewline   # disable line wrapping
+    if (-not $script:firstSyncDraw) {
+        Write-Host "$ESC[$($script:syncDisplayLines)A" -NoNewline
+    }
+    $script:firstSyncDraw = $false
+
+    $curPct = Parse-SyncPct
+    $curBytes = [int64]($script:curFileSize * $curPct / 100)
+    $totalNow = $script:uploadedBytes + $curBytes
+
+    Write-Host "$CLR  ${BOLD}SYNC PROGRESS${RESET}"
+    Write-Host "$CLR"
+
+    # File list
+    for ($i = 0; $i -lt $script:totalCount; $i++) {
+        $name   = $script:sfDisp[$i]
+        $dir    = $script:sfDir[$i]
+        $status = $script:sfStatus[$i]
+
+        if ($dir -eq 'up') {
+            $smb = Format-MB $script:sfSize[$i]
+            $sizeStr = "$($smb.PadLeft(7)) MB"
+        } else {
+            $sizeStr = "$(' '.PadLeft(5))$([char]0x2193)   "
+        }
+
+        $padName = $name.PadRight(30)
+
+        if ($status -eq 'done') {
+            Write-Host "$CLR  ${GREEN}$([char]0x2713)${RESET} $padName $sizeStr  $($script:sfSpeed[$i].PadLeft(5)) MB/s  $($script:sfTime[$i])"
+        }
+        elseif ($status -eq 'error') {
+            Write-Host "$CLR  ${RED}$([char]0x2717)${RESET} $padName $sizeStr  error"
+        }
+        elseif ($status -eq 'active') {
+            $action = if ($dir -eq 'up') { "uploading..." } else { "downloading..." }
+            Write-Host "$CLR  ${YELLOW}$([char]0x25B6)${RESET} $padName $sizeStr  $action"
+        }
+        else {
+            Write-Host "$CLR  ${GRAY}$([char]0x00B7)${RESET} $padName $sizeStr  waiting"
+        }
     }
 
-    Write-Host -NoNewline "  [$processed/$totalCount] Uploading $display...$CLR`r"
+    Write-Host "$CLR"
 
-    # Get mod time for MFMT
+    # Overall progress bar (by file count)
+    $completed = 0
+    for ($i = 0; $i -lt $script:totalCount; $i++) {
+        if ($script:sfStatus[$i] -eq 'done' -or $script:sfStatus[$i] -eq 'error') { $completed++ }
+    }
+    $elapsed = [int]((Get-Date) - $script:transferStart).TotalSeconds
+    $elapsedStr = ""
+    if ($elapsed -gt 0) { $elapsedStr = "  $(Format-Time $elapsed)" }
+    $bar = Draw-Bar -Current $completed -Max $script:totalCount -Width 30
+    Write-Host "$CLR  Overall  $bar  $completed/$($script:totalCount) files$elapsedStr"
+
+    # Current file progress bar
+    $fileElapsed = [int]((Get-Date) - $script:curFileStart).TotalSeconds
+    $fileSpeed = ""
+    if ($fileElapsed -gt 0 -and $curBytes -gt 0) {
+        $fileSpeed = "$([Math]::Round($curBytes / $fileElapsed / 1MB, 1).ToString('0.0')) MB/s"
+    }
+    if ($script:curFileSize -gt 0) {
+        $fileBar = Draw-Bar -Current $curBytes -Max $script:curFileSize -Width 30
+    } else {
+        $fileBar = Draw-Bar -Current $curPct -Max 100 -Width 30
+    }
+    $fileIdx = "$($script:curFileIdx + 1)/$($script:totalCount)"
+    Write-Host "$CLR  [$fileIdx]   $fileBar  $($script:curFileShort.PadRight(16)) $fileSpeed"
+
+    Write-Host "$CLR"
+    Write-Host "$ESC[?7h" -NoNewline   # re-enable line wrapping
+}
+
+Write-Host ""
+
+# --- Uploads ---
+for ($ui = 0; $ui -lt $uploadCount; $ui++) {
+    $entry = $allUploads[$ui]
+
+    $sfStatus[$ui] = 'active'
+    $curFileIdx   = $ui
+    $curFileSize  = [int64]$entry.size
+    $curFileStart = Get-Date
+    $curFileShort = Split-Path $entry.relPath -Leaf
+    if ($curFileShort.Length -gt 16) {
+        $curFileShort = "..." + $curFileShort.Substring($curFileShort.Length - 13)
+    }
+
     $modTime = ""
     if (Test-Path $entry.localPath) {
         $modTime = (Get-Item $entry.localPath).LastWriteTimeUtc.ToString("yyyyMMddHHmmss")
@@ -383,36 +552,63 @@ foreach ($entry in $allUploads) {
     $filename = Split-Path $remotePath -Leaf
     $url = Get-EncodedFtpUrl $remotePath
 
-    $cmd = "$(Get-CurlBase) --ftp-create-dirs"
+    $argString = '--progress-bar'
+    if ($useFtps -and $tlsFlags) { $argString += " $tlsFlags" }
+    $argString += " --netrc-file `"$netrcFile`""
+    $argString += ' --ftp-create-dirs'
     if ($modTime) {
-        $cmd += " -Q `"-*MFMT $modTime /$remotePath`" -Q `"-*MFMT $modTime $filename`" -Q `"-*SITE UTIME $filename $modTime $modTime $modTime UTC`""
+        $argString += " -Q `"-*MFMT $modTime /$remotePath`""
+        $argString += " -Q `"-*MFMT $modTime $filename`""
+        $argString += " -Q `"-*SITE UTIME $filename $modTime $modTime $modTime UTC`""
     }
-    $cmd += " -T `"$($entry.localPath)`" `"$url`""
+    $argString += " -T `"$($entry.localPath)`""
+    $argString += " `"$url`""
 
-    try {
-        $output = Invoke-Expression $cmd 2>&1
-        if ($LASTEXITCODE -ne 0 -or ($output -and "$output" -match "^curl:")) {
-            $uploadErrors++
-            Write-Host ""
-            Write-Host "  ${RED}Error uploading: $display${RESET}"
+    "" | Set-Content $curlProgress
+
+    $curlProcess = Start-Process -FilePath 'curl' `
+        -ArgumentList $argString `
+        -RedirectStandardError $curlProgress `
+        -NoNewWindow -PassThru
+
+    while (-not $curlProcess.HasExited) {
+        Draw-SyncProgress
+        Start-Sleep -Milliseconds 400
+    }
+
+    $curlProcess.WaitForExit()
+    $curlExit = $curlProcess.ExitCode
+    if ($null -eq $curlExit) { $curlExit = 0 }
+
+    $ufElapsed = [int]((Get-Date) - $curFileStart).TotalSeconds
+    if ($curlExit -eq 0) {
+        $uploadedBytes += [int64]$entry.size
+        $sfStatus[$ui] = 'done'
+        if ($ufElapsed -gt 0) {
+            $sfSpeed[$ui] = [Math]::Round([int64]$entry.size / $ufElapsed / 1MB, 1).ToString('0.0')
+        } else {
+            $sfSpeed[$ui] = '--'
         }
-    } catch {
+        $sfTime[$ui] = Format-Time $ufElapsed
+    } else {
         $uploadErrors++
-        Write-Host ""
-        Write-Host "  ${RED}Error uploading: $display${RESET}"
+        $sfStatus[$ui] = 'error'
     }
 }
 
-# Downloads
-foreach ($entry in $allDownloads) {
-    $processed++
-    if ($scanRootCount -gt 1) {
-        $display = "$($entry.label)/$($entry.dateFolder)/$($entry.relPath)"
-    } else {
-        $display = "$($entry.dateFolder)/$($entry.relPath)"
-    }
+# --- Downloads ---
+for ($di = 0; $di -lt $downloadCount; $di++) {
+    $entry = $allDownloads[$di]
+    $fileIdx = $uploadCount + $di
 
-    Write-Host -NoNewline "  [$processed/$totalCount] Downloading $display...$CLR`r"
+    $sfStatus[$fileIdx] = 'active'
+    $curFileIdx   = $fileIdx
+    $curFileSize  = [int64]0
+    $curFileStart = Get-Date
+    $curFileShort = Split-Path $entry.relPath -Leaf
+    if ($curFileShort.Length -gt 16) {
+        $curFileShort = "..." + $curFileShort.Substring($curFileShort.Length - 13)
+    }
 
     # Create local directory
     $localDir = Split-Path $entry.localPath -Parent
@@ -420,40 +616,74 @@ foreach ($entry in $allDownloads) {
 
     $url = Get-EncodedFtpUrl $entry.remotePath
 
-    $cmd = "$(Get-CurlBase) -R -o `"$($entry.localPath)`" `"$url`""
-    try {
-        $output = Invoke-Expression $cmd 2>&1
-        if ($LASTEXITCODE -ne 0 -or ($output -and "$output" -match "^curl:")) {
-            $downloadErrors++
-            Write-Host ""
-            Write-Host "  ${RED}Error downloading: $display${RESET}"
+    $argString = '--progress-bar'
+    if ($useFtps -and $tlsFlags) { $argString += " $tlsFlags" }
+    $argString += " --netrc-file `"$netrcFile`""
+    $argString += " -R"
+    $argString += " -o `"$($entry.localPath)`""
+    $argString += " `"$url`""
+
+    "" | Set-Content $curlProgress
+
+    $curlProcess = Start-Process -FilePath 'curl' `
+        -ArgumentList $argString `
+        -RedirectStandardError $curlProgress `
+        -NoNewWindow -PassThru
+
+    while (-not $curlProcess.HasExited) {
+        Draw-SyncProgress
+        Start-Sleep -Milliseconds 400
+    }
+
+    $curlProcess.WaitForExit()
+    $curlExit = $curlProcess.ExitCode
+    if ($null -eq $curlExit) { $curlExit = 0 }
+
+    $dfElapsed = [int]((Get-Date) - $curFileStart).TotalSeconds
+    if ($curlExit -eq 0) {
+        $sfStatus[$fileIdx] = 'done'
+        $dlSize = 0
+        if (Test-Path $entry.localPath) { $dlSize = (Get-Item $entry.localPath).Length }
+        if ($dfElapsed -gt 0 -and $dlSize -gt 0) {
+            $sfSpeed[$fileIdx] = [Math]::Round($dlSize / $dfElapsed / 1MB, 1).ToString('0.0')
+        } else {
+            $sfSpeed[$fileIdx] = '--'
         }
-    } catch {
+        $sfTime[$fileIdx] = Format-Time $dfElapsed
+    } else {
         $downloadErrors++
-        Write-Host ""
-        Write-Host "  ${RED}Error downloading: $display${RESET}"
+        $sfStatus[$fileIdx] = 'error'
     }
 }
 
-Write-Host "$CLR"
+# Final redraw
+Draw-SyncProgress
+
+$transferEnd  = Get-Date
+$transferTime = [int]($transferEnd - $transferStart).TotalSeconds
+$totalTime    = [int]($transferEnd - $syncStart).TotalSeconds
+
+Remove-Item $curlProgress -ErrorAction SilentlyContinue
+Remove-Item $curlExitFile -ErrorAction SilentlyContinue
 
 # ============================================================
 # SUMMARY
 # ============================================================
 
-$transferEnd = Get-Date
-$transferTime = [int]($transferEnd - $transferStart).TotalSeconds
-$totalTime    = [int]($transferEnd - $syncStart).TotalSeconds
-
 Write-Host ""
+$sep = ([string]([char]0x2550)) * 52
 Write-Host "  $sep"
 Write-Host "  ${BOLD}${GREEN}SYNC COMPLETE${RESET}"
-Write-Host -NoNewline "  Uploaded:   $uploadCount file(s)"
-if ($uploadErrors -gt 0) { Write-Host -NoNewline "  ${RED}($uploadErrors failed)${RESET}" }
-Write-Host ""
-Write-Host -NoNewline "  Downloaded: $downloadCount file(s)"
-if ($downloadErrors -gt 0) { Write-Host -NoNewline "  ${RED}($downloadErrors failed)${RESET}" }
-Write-Host ""
+if ($uploadCount -gt 0) {
+    Write-Host -NoNewline "  Uploaded:   $uploadCount file(s) ($(Format-MB $uploadedBytes) MB) in $(Format-Time $transferTime)"
+    if ($uploadErrors -gt 0) { Write-Host -NoNewline "  ${RED}($uploadErrors failed)${RESET}" }
+    Write-Host ""
+}
+if ($downloadCount -gt 0) {
+    Write-Host -NoNewline "  Downloaded: $downloadCount file(s) in $(Format-Time $transferTime)"
+    if ($downloadErrors -gt 0) { Write-Host -NoNewline "  ${RED}($downloadErrors failed)${RESET}" }
+    Write-Host ""
+}
 Write-Host "  Total time: $(Format-Time $totalTime)"
 Write-Host "  $sep"
 Write-Host ""
