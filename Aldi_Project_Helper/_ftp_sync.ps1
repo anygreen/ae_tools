@@ -92,12 +92,8 @@ for ($i = 1; $i -le $scanRootCount; $i++) {
 # HELPERS
 # ============================================================
 
-$netrcFile = [System.IO.Path]::GetTempFileName()
-$netrcFileGlobal = $netrcFile
-Set-Content -Path $netrcFile -Value "machine $ftpHost login $ftpUser password $ftpPass" -NoNewline
-
 function Get-CurlBase {
-    $base = "curl -sS --netrc-file `"$netrcFile`" --max-time 30"
+    $base = "curl -sS --user `"${ftpUser}:${ftpPass}`" --max-time 30"
     if ($useFtps -and $tlsFlags) {
         $base = "$base $tlsFlags"
     }
@@ -431,6 +427,11 @@ $curFileShort = ""
 # Display height: header(1) + blank(1) + files(N) + blank(1) + overall(1) + current(1) + blank(1)
 $syncDisplayLines = $totalCount + 6
 $firstSyncDraw = $true
+
+# Netrc file for curl credentials (needed by Start-Process transfers)
+$netrcFile = [System.IO.Path]::GetTempFileName()
+$netrcFileGlobal = $netrcFile
+Set-Content -Path $netrcFile -Value "machine $ftpHost login $ftpUser password $ftpPass" -NoNewline
 
 # Temp files for curl progress capture
 $curlProgress = [System.IO.Path]::GetTempFileName()

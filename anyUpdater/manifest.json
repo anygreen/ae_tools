@@ -4,7 +4,7 @@
     {
       "id": "aldi_project_helper",
       "name": "Aldi Project Helper",
-      "version": "2.2.20",
+      "version": "2.2.21",
       "files": [
         { "repo": "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx", "local": "Aldi_Project_Helper_V2.jsx" },
         { "repo": "Aldi_Project_Helper/_ftp.jsx",                   "local": "Aldi_Project_Helper/_ftp.jsx" },
