@@ -539,27 +539,32 @@
      * @returns {string|null} Path to aerender, or null if not found
      */
     function getAerenderPath() {
+        // Folder.appPackage gives:
+        //   Mac: /Applications/Adobe After Effects 2025/Adobe After Effects 2025.app
+        //   Win: C:\Program Files\Adobe\Adobe After Effects 2025\Support Files
+        var pkgPath = Folder.appPackage ? Folder.appPackage.fsName : "";
         var aerenderPath;
+
         if (IS_MAC) {
-            // Mac: app.path may be either:
-            //   /Applications/Adobe After Effects 2025  (older)
-            //   /Applications/Adobe After Effects 2025/Adobe After Effects 2025.app/Contents/MacOS  (newer)
-            // aerender is always beside the .app bundle, not inside it.
-            aerenderPath = app.path + "/aerender";
-            if (new File(aerenderPath).exists) return aerenderPath;
-            // Fallback: walk up from .app/Contents/MacOS to the app bundle's parent
-            var appFolder = new Folder(app.path);
-            while (appFolder && appFolder.name !== "" && appFolder.fsName !== "/") {
-                if (appFolder.name.indexOf(".app") !== -1) {
-                    aerenderPath = appFolder.parent.fsName + "/aerender";
+            // aerender sits beside the .app bundle (its parent directory)
+            var appPkg = new Folder(pkgPath);
+            if (appPkg.parent) {
+                aerenderPath = appPkg.parent.fsName + "/aerender";
+                if (new File(aerenderPath).exists) return aerenderPath;
+            }
+            // Fallback: walk up until we find a .app folder
+            var cur = appPkg;
+            while (cur && cur.name !== "" && cur.fsName !== "/") {
+                if (cur.name.indexOf(".app") !== -1) {
+                    aerenderPath = cur.parent.fsName + "/aerender";
                     if (new File(aerenderPath).exists) return aerenderPath;
                     break;
                 }
-                appFolder = appFolder.parent;
+                cur = cur.parent;
             }
         } else {
-            // Windows: app.path is e.g. C:\Program Files\Adobe\Adobe After Effects 2025\Support Files
-            aerenderPath = app.path + "\\aerender.exe";
+            // Windows: aerender.exe is in the Support Files folder
+            aerenderPath = pkgPath + "\\aerender.exe";
             if (new File(aerenderPath).exists) return aerenderPath;
         }
         return null;
@@ -664,9 +669,9 @@
         // Validate aerender
         var aerenderPath = getAerenderPath();
         if (!aerenderPath) {
+            var pkgInfo = Folder.appPackage ? Folder.appPackage.fsName : "(unknown)";
             alert("aerender not found.\n\n" +
-                  "Expected location:\n" +
-                  (IS_MAC ? app.path + "/aerender" : app.path + "\\aerender.exe") +
+                  "Searched near:\n" + pkgInfo +
                   "\n\nPlease verify your After Effects installation.");
             return false;
         }
