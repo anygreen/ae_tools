@@ -363,21 +363,23 @@ if [ "$DO_UPLOAD" = "1" ]; then
     CURL_CMD=$(mktemp /tmp/ae_curl_cmd_XXXXXX.sh)
     chmod +x "$CURL_CMD"
 
-    # Print upload header (static, never redrawn)
-    printf "\n  ${BOLD}UPLOAD PROGRESS${RESET}\n\n"
+    # Per-file upload status for display (mirrors render phase approach)
+    UF_STATUS=()
+    for ((uf_i=0; uf_i<FILE_COUNT; uf_i++)); do
+        UF_STATUS[$uf_i]="waiting"
+    done
 
-    # Growing display: only the bottom 2 lines are ever redrawn via cursor-up 2.
-    # Completed file results are printed once above and never touched again.
-    # This avoids the line-wrapping bug that breaks cursor-up with large N.
+    # Display height: header(1) + blank(1) + files(N) + blank(1) + overall(1) + current(1) + blank(1)
+    UPLOAD_DISPLAY_LINES=$((FILE_COUNT + 6))
     FIRST_UPLOAD_DRAW=1
     CUR_FILE_SIZE=0
     CUR_FILE_START=0
     CUR_FILE_IDX=0
     CUR_FILE_SHORT=""
 
-    draw_upload_bars() {
+    draw_upload_progress() {
         if [ "$FIRST_UPLOAD_DRAW" = "0" ]; then
-            printf "\033[2A"
+            printf "\033[${UPLOAD_DISPLAY_LINES}A"
         fi
         FIRST_UPLOAD_DRAW=0
 
@@ -387,7 +389,32 @@ if [ "$DO_UPLOAD" = "1" ]; then
         local cur_bytes=$((CUR_FILE_SIZE * cur_pct / 100))
         local total_now=$((UPLOADED_BYTES + cur_bytes))
 
-        # Line 1: Overall progress
+        printf "${CLR}  ${BOLD}UPLOAD PROGRESS${RESET}\n"
+        printf "${CLR}\n"
+
+        # File list
+        local i
+        for ((i=0; i<FILE_COUNT; i++)); do
+            local name="${UF_DISP[$i]}"
+            local smb
+            smb=$(format_mb ${UF_SIZES[$i]})
+            local status="${UF_STATUS[$i]}"
+
+            if [ "$status" = "done" ]; then
+                printf "${CLR}  ${GREEN}✓${RESET} %-30s %7s MB  %5s MB/s  %s\n" \
+                    "$name" "$smb" "${UF_RESULT_SPEED[$i]}" "${UF_RESULT_TIME[$i]}"
+            elif [ "$status" = "error" ]; then
+                printf "${CLR}  ${RED}✗${RESET} %-30s %7s MB  error\n" "$name" "$smb"
+            elif [ "$status" = "uploading" ]; then
+                printf "${CLR}  ${YELLOW}▶${RESET} %-30s %7s MB  uploading...\n" "$name" "$smb"
+            else
+                printf "${CLR}  ${GRAY}·${RESET} %-30s %7s MB  waiting\n" "$name" "$smb"
+            fi
+        done
+
+        printf "${CLR}\n"
+
+        # Overall progress bar
         local up_mb
         up_mb=$(format_mb $total_now)
         local elapsed=$(($(date +%s) - UPLOAD_START))
@@ -400,7 +427,7 @@ if [ "$DO_UPLOAD" = "1" ]; then
         draw_bar "$total_now" "$TOTAL_BYTES" 30
         printf "  %s/%s MB%s\n" "$up_mb" "$TOTAL_MB" "$speed_str"
 
-        # Line 2: Current file progress bar + live speed
+        # Current file progress bar
         local file_elapsed=$(($(date +%s) - CUR_FILE_START))
         local file_speed=""
         if [ "$file_elapsed" -gt 0 ] && [ "$cur_bytes" -gt 0 ]; then
@@ -410,20 +437,11 @@ if [ "$DO_UPLOAD" = "1" ]; then
         printf "${CLR}  [%d/%d]   " "$((CUR_FILE_IDX + 1))" "$FILE_COUNT"
         draw_bar "$cur_bytes" "$CUR_FILE_SIZE" 30
         printf "  %-16s %s\n" "$CUR_FILE_SHORT" "$file_speed"
+
+        printf "${CLR}\n"
     }
 
-    print_result_line() {
-        local idx=$1
-        local name="${UF_DISP[$idx]}"
-        local smb
-        smb=$(format_mb ${UF_SIZES[$idx]})
-        if [ "${UF_RESULT_OK[$idx]}" = "1" ]; then
-            printf "${CLR}  ${GREEN}✓${RESET} %-30s %7s MB  %5s MB/s  %s\n" \
-                "$name" "$smb" "${UF_RESULT_SPEED[$idx]}" "${UF_RESULT_TIME[$idx]}"
-        else
-            printf "${CLR}  ${RED}✗${RESET} %-30s %7s MB  error\n" "$name" "$smb"
-        fi
-    }
+    printf "\n"
 
     # Upload each file
     for ((fi=0; fi<FILE_COUNT; fi++)); do
@@ -434,14 +452,10 @@ if [ "$DO_UPLOAD" = "1" ]; then
         uf_fsize=${UF_SIZES[$fi]}
         uf_mtime=$(get_ftp_timestamp "$uf_file")
 
-        # Commit previous file's result line above the 2 updating lines
-        if [ $fi -gt 0 ]; then
-            printf "\033[2A"
-            print_result_line $((fi - 1))
-            FIRST_UPLOAD_DRAW=1
-        fi
+        # Update status
+        UF_STATUS[$fi]="uploading"
 
-        # Set current file info for draw_upload_bars
+        # Set current file info for draw_upload_progress
         CUR_FILE_IDX=$fi
         CUR_FILE_SIZE=$uf_fsize
         CUR_FILE_START=$(date +%s)
@@ -473,7 +487,7 @@ CURLEOF
 
         # Monitor with live progress
         while kill -0 "$CURL_PID" 2>/dev/null; do
-            draw_upload_bars
+            draw_upload_progress
             sleep 0.4
         done
         wait "$CURL_PID" 2>/dev/null
@@ -487,6 +501,7 @@ CURLEOF
         if [ "$curl_exit" = "0" ]; then
             UPLOADED_BYTES=$((UPLOADED_BYTES + uf_fsize))
             UPLOADED_COUNT=$((UPLOADED_COUNT + 1))
+            UF_STATUS[$fi]="done"
             UF_RESULT_OK[$fi]="1"
             if [ "$uf_elapsed" -gt 0 ]; then
                 UF_RESULT_SPEED[$fi]=$(awk -v s="$uf_fsize" -v t="$uf_elapsed" \
@@ -497,28 +512,15 @@ CURLEOF
             UF_RESULT_TIME[$fi]=$(format_time $uf_elapsed)
         else
             UPLOAD_ERRORS=$((UPLOAD_ERRORS + 1))
+            UF_STATUS[$fi]="error"
             UF_RESULT_OK[$fi]="0"
+            UF_RESULT_SPEED[$fi]=""
+            UF_RESULT_TIME[$fi]=""
         fi
     done
 
-    # Commit last file result and show final overall
-    if [ "$FILE_COUNT" -gt 0 ]; then
-        printf "\033[2A"
-        print_result_line $((FILE_COUNT - 1))
-
-        # Final overall bar
-        up_mb=$(format_mb $UPLOADED_BYTES)
-        elapsed=$(($(date +%s) - UPLOAD_START))
-        speed_str=""
-        if [ "$elapsed" -gt 0 ] && [ "$UPLOADED_BYTES" -gt 0 ]; then
-            speed_str="  $(awk -v b="$UPLOADED_BYTES" -v t="$elapsed" \
-                'BEGIN { printf "%.1f", b / t / 1048576 }') MB/s"
-        fi
-        printf "${CLR}  Overall  "
-        draw_bar "$UPLOADED_BYTES" "$TOTAL_BYTES" 30
-        printf "  %s/%s MB%s\n" "$up_mb" "$TOTAL_MB" "$speed_str"
-    fi
-    printf "\n"
+    # Final redraw with all files complete
+    draw_upload_progress
 
     UPLOAD_END=$(date +%s)
     UPLOAD_TIME=$((UPLOAD_END - UPLOAD_START))
