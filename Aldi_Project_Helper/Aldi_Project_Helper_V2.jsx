@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.1.2
+ * @version 2.1.3
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.1.2";
+    var SCRIPT_VERSION = "v2.1.3";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -628,7 +628,7 @@
     projectDropdownGroup.alignment     = ["fill", "top"];
     projectDropdownGroup.alignChildren = ["fill", "center"];
 
-    var projectDropdown = projectDropdownGroup.add("dropdownlist", [0, 0, 200, 25], []);
+    var projectDropdown = projectDropdownGroup.add("dropdownlist", [0, 0, 100, 25], []);
 
     var projectButtonGroup = projectDropdownGroup.add("group");
     projectButtonGroup.orientation = "row";
@@ -649,7 +649,7 @@
     subProjectGroup.alignChildren = ["fill", "top"];
 
     var subProjectLabel   = subProjectGroup.add("statictext", undefined, "Sub-project:");
-    var subProjectDropdown = subProjectGroup.add("dropdownlist", [0, 0, 300, 25], ["(No sub-projects)"]);
+    var subProjectDropdown = subProjectGroup.add("dropdownlist", [0, 0, 100, 25], ["(No sub-projects)"]);
     subProjectDropdown.selection = 0;
     subProjectDropdown.enabled   = false;
 
