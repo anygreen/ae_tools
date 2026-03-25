@@ -14,6 +14,10 @@ if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
+# Fix bare CR line endings from ExtendScript (macOS defaults to Classic Mac \r)
+# This makes the script self-contained — no reliance on the caller to fix line endings.
+tr "\r" "\n" < "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+
 AERENDER=""
 PROJECT=""
 OUTPUT_FOLDER=""
