@@ -33,3 +33,11 @@ username=Ostern_Grill_Lennert_Exchange
 password=tzer78wdTsws
 port=21
 [/CONNECTION]
+
+[CONNECTION]
+project_folder=Aldi_V40_PreisOff
+hostname=fra-clients.acht.studio
+username=lennert_exchange_preisoff
+password=78bddZtds
+port=21
+[/CONNECTION]
