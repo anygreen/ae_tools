@@ -14,26 +14,27 @@
 
     /**
      * Returns curl TLS flags for explicit FTPS (AUTH TLS on port 21).
-     * On Windows (Schannel), adds:
-     *   --ssl-no-revoke   bypass CRL check failures
-     *   --tls-max 1.2     pin to TLS 1.2 for reliable Schannel negotiation
-     *   PROT C            use clear (unencrypted) data channel — works around
-     *                     a known Schannel bug where the TLS close_notify on
-     *                     the data channel causes curl to lose buffered data
-     *                     (curl issues #5284, #9161). The control channel
-     *                     (credentials) stays encrypted.
+     *
+     * Mac: --ssl-reqd encrypts both control and data channels (OpenSSL
+     *      handles FTP data-channel TLS correctly).
+     *
+     * Windows (Schannel): uses --ftp-ssl-control instead of --ssl-reqd.
+     *      This encrypts only the control channel (login / credentials)
+     *      and leaves data transfers unencrypted. Works around a known
+     *      Schannel bug where the TLS close_notify on the data channel
+     *      causes curl to lose buffered data (curl issues #5284, #9161).
+     *      Additional Schannel workarounds:
+     *        --ssl-no-revoke   bypass CRL check failures
+     *        --tls-max 1.2     pin TLS 1.2 for reliable negotiation
+     *
      * @returns {string} TLS flags for curl
      */
     function getTLSFlags() {
         if (!USE_FTPS) return "";
-        var flags = "--ssl-reqd -k";
         if (!IS_MAC) {
-            flags += " --ssl-no-revoke --tls-max 1.2";
-            // PROT C = clear data channel. The "*" prefix tells curl to
-            // continue even if the server rejects the command.
-            flags += ' -Q "*PROT C"';
+            return "--ftp-ssl-control -k --ssl-no-revoke --tls-max 1.2";
         }
-        return flags;
+        return "--ssl-reqd -k";
     }
 
     /**
