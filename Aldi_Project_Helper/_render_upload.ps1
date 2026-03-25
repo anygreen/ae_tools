@@ -249,7 +249,10 @@ while (-not $aerenderProcess.HasExited) {
     Draw-RenderProgress
 }
 
+# WaitForExit() is required to populate ExitCode reliably in PowerShell
+$aerenderProcess.WaitForExit()
 $renderExit = $aerenderProcess.ExitCode
+if ($null -eq $renderExit) { $renderExit = 0 }
 
 # Final parse
 Parse-NewLines
@@ -506,7 +509,9 @@ if ($doUpload) {
             Start-Sleep -Milliseconds 400
         }
 
+        $curlProcess.WaitForExit()
         $curlExit = $curlProcess.ExitCode
+        if ($null -eq $curlExit) { $curlExit = 0 }
 
         $ufElapsed = [int]((Get-Date) - $curFileStart).TotalSeconds
         if ($curlExit -eq 0) {
