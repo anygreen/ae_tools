@@ -700,6 +700,8 @@
         // Launch in visible terminal
         try {
             if (IS_MAC) {
+                // Strip Windows line endings that may have been introduced during download
+                system.callSystem('sed -i "" "s/\\r$//" "' + helperPath + '"');
                 // Make script executable
                 system.callSystem('chmod +x "' + helperPath + '"');
                 // Launch via osascript → Terminal.app
