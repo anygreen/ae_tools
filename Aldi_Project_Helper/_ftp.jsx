@@ -639,7 +639,7 @@
         for (var i = 0; i < setup.activeItems.length; i++) {
             var rqItem = setup.activeItems[i];
             var comp = rqItem.comp;
-            var frames = Math.ceil(comp.duration * comp.frameRate);
+            var frames = Math.ceil(rqItem.timeSpanDuration * comp.frameRate);
             compCount++;
             totalFrames += frames;
             lines.push("COMP_" + compCount + "=" + comp.name + "::" + frames);
