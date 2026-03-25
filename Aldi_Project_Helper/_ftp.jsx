@@ -529,3 +529,197 @@
 
         return { toUpload: toUpload, toDownload: toDownload };
     }
+
+    // ============================================================
+    // EXTERNAL RENDER & UPLOAD — background terminal launch
+    // ============================================================
+
+    /**
+     * Returns the path to the aerender executable for the current platform.
+     * @returns {string|null} Path to aerender, or null if not found
+     */
+    function getAerenderPath() {
+        var aerenderPath;
+        if (IS_MAC) {
+            // Mac: app.path may be either:
+            //   /Applications/Adobe After Effects 2025  (older)
+            //   /Applications/Adobe After Effects 2025/Adobe After Effects 2025.app/Contents/MacOS  (newer)
+            // aerender is always beside the .app bundle, not inside it.
+            aerenderPath = app.path + "/aerender";
+            if (new File(aerenderPath).exists) return aerenderPath;
+            // Fallback: walk up from .app/Contents/MacOS to the app bundle's parent
+            var appFolder = new Folder(app.path);
+            while (appFolder && appFolder.name !== "" && appFolder.fsName !== "/") {
+                if (appFolder.name.indexOf(".app") !== -1) {
+                    aerenderPath = appFolder.parent.fsName + "/aerender";
+                    if (new File(aerenderPath).exists) return aerenderPath;
+                    break;
+                }
+                appFolder = appFolder.parent;
+            }
+        } else {
+            // Windows: app.path is e.g. C:\Program Files\Adobe\Adobe After Effects 2025\Support Files
+            aerenderPath = app.path + "\\aerender.exe";
+            if (new File(aerenderPath).exists) return aerenderPath;
+        }
+        return null;
+    }
+
+    /**
+     * Returns the path to the platform-specific render/upload helper script.
+     * Checks both flat-install and subfolder-install locations.
+     * @returns {string|null} Path to helper script, or null if not found
+     */
+    function getHelperScriptPath() {
+        var mainScript = new File($.fileName);
+        var parentFolder = mainScript.parent;
+        var scriptName = IS_MAC ? "_render_upload.sh" : "_render_upload.ps1";
+
+        // Flat install: ScriptUI Panels/Aldi_Project_Helper_V2.jsx
+        //   helper at: ScriptUI Panels/Aldi_Project_Helper/_render_upload.sh
+        var path1 = parentFolder.fsName + (IS_MAC ? "/" : "\\") +
+                     "Aldi_Project_Helper" + (IS_MAC ? "/" : "\\") + scriptName;
+        if (new File(path1).exists) return path1;
+
+        // Subfolder install: ScriptUI Panels/Aldi_Project_Helper/...V2.jsx
+        //   helper at: ScriptUI Panels/Aldi_Project_Helper/_render_upload.sh
+        var path2 = parentFolder.fsName + (IS_MAC ? "/" : "\\") + scriptName;
+        if (new File(path2).exists) return path2;
+
+        return null;
+    }
+
+    /**
+     * Generates a temp config file for the external render/upload script.
+     * @param {Object} setup - Result from setupRenderOutput()
+     * @param {Object|null} ftpConfig - FTP connection config, or null for render-only
+     * @returns {string} Path to the generated config file
+     */
+    function generateRenderConfig(setup, ftpConfig) {
+        var timestamp = new Date().getTime();
+        var tempDir = Folder.temp.fsName;
+        var sep = IS_MAC ? "/" : "\\";
+        var configPath = tempDir + sep + "ae_render_config_" + timestamp + ".txt";
+
+        var aerenderPath = getAerenderPath();
+        var projectPath = app.project.file.fsName;
+
+        var lines = [];
+        lines.push("AERENDER=" + aerenderPath);
+        lines.push("PROJECT=" + projectPath);
+        lines.push("OUTPUT_FOLDER=" + setup.timeFolderPath);
+
+        if (ftpConfig) {
+            lines.push("DO_UPLOAD=1");
+            lines.push("FTP_HOST=" + ftpConfig.hostname);
+            lines.push("FTP_PORT=" + (ftpConfig.port || "21"));
+            lines.push("FTP_USER=" + ftpConfig.username);
+            lines.push("FTP_PASS=" + ftpConfig.password);
+            lines.push("USE_FTPS=" + (USE_FTPS ? "1" : "0"));
+            lines.push("TLS_FLAGS=" + getTLSFlags());
+
+            var remoteTimePath = FTP_OUTPUT_PATH +
+                (setup.renderSubProject ? "/" + setup.renderSubProject : "") +
+                "/" + setup.dateFolder + "/" + setup.timeFolder;
+            lines.push("REMOTE_BASE=" + remoteTimePath);
+        } else {
+            lines.push("DO_UPLOAD=0");
+        }
+
+        // Gather comp info from render queue
+        var compCount = 0;
+        var totalFrames = 0;
+        for (var i = 0; i < setup.activeItems.length; i++) {
+            var rqItem = setup.activeItems[i];
+            var comp = rqItem.comp;
+            var frames = Math.ceil(comp.duration * comp.frameRate);
+            compCount++;
+            totalFrames += frames;
+            lines.push("COMP_" + compCount + "=" + comp.name + "::" + frames);
+        }
+        lines.push("COMP_COUNT=" + compCount);
+        lines.push("TOTAL_FRAMES=" + totalFrames);
+
+        // Write config file
+        var configFile = new File(configPath);
+        configFile.encoding = "UTF-8";
+        configFile.open("w");
+        for (var i = 0; i < lines.length; i++) {
+            configFile.writeln(lines[i]);
+        }
+        configFile.close();
+
+        return configPath;
+    }
+
+    /**
+     * Launches the external render (and optionally upload) script in a visible
+     * terminal window. Returns immediately — AE stays responsive.
+     *
+     * @param {Object} setup - Result from setupRenderOutput()
+     * @param {Object|null} ftpConfig - FTP config, or null for render-only
+     * @returns {boolean} True if launched successfully
+     */
+    function launchExternalRender(setup, ftpConfig) {
+        // Validate aerender
+        var aerenderPath = getAerenderPath();
+        if (!aerenderPath) {
+            alert("aerender not found.\n\n" +
+                  "Expected location:\n" +
+                  (IS_MAC ? app.path + "/aerender" : app.path + "\\aerender.exe") +
+                  "\n\nPlease verify your After Effects installation.");
+            return false;
+        }
+
+        // Validate helper script
+        var helperPath = getHelperScriptPath();
+        if (!helperPath) {
+            alert("Render helper script not found.\n\n" +
+                  "Expected: _render_upload." + (IS_MAC ? "sh" : "ps1") +
+                  "\nin the Aldi_Project_Helper folder.\n\n" +
+                  "Please run anyUpdater to install the latest version.");
+            return false;
+        }
+
+        // Save the project so aerender can open the saved state
+        if (!app.project.file) {
+            alert("Please save the project first.\n\n" +
+                  "The background renderer needs a saved .aep file to work with.");
+            return false;
+        }
+        app.project.save();
+
+        // Generate config file
+        var configPath = generateRenderConfig(setup, ftpConfig);
+
+        // Launch in visible terminal
+        try {
+            if (IS_MAC) {
+                // Make script executable
+                system.callSystem('chmod +x "' + helperPath + '"');
+                // Launch via osascript → Terminal.app
+                var osaCmd = 'osascript -e \'tell application "Terminal"' +
+                             ' to do script "\\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
+                system.callSystem(osaCmd);
+            } else {
+                // Windows: use VBScript to launch PowerShell non-blocking
+                var tempDir = Folder.temp.fsName;
+                var vbsPath = tempDir + "\\ae_launch_render.vbs";
+                var vbs = new File(vbsPath);
+                vbs.open("w");
+                vbs.writeln('Set objShell = CreateObject("WScript.Shell")');
+                vbs.writeln('objShell.Run "powershell -ExecutionPolicy Bypass -NoProfile -File ""' +
+                            helperPath + '"" ""' + configPath + '""", 1, False');
+                vbs.close();
+                system.callSystem('wscript //B "' + vbsPath + '"');
+                // Clean up VBS launcher (PowerShell is already running)
+                try { new File(vbsPath).remove(); } catch(ex) {}
+            }
+            return true;
+        } catch (e) {
+            alert("Failed to launch background render:\n" + e.message);
+            // Clean up config file on failure
+            try { new File(configPath).remove(); } catch(ex) {}
+            return false;
+        }
+    }

@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.1.3
+ * @version 2.2.0
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.1.3";
+    var SCRIPT_VERSION = "v2.2.0";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1537,11 +1537,15 @@
             confirmMsg += "Active items: " + setup.activeItems.length + "\n";
             confirmMsg += "Output modules updated: " + setup.outputCount + "\n\n";
             if (clipboardSuccess) { confirmMsg += "Path copied to clipboard!\n\n"; }
-            confirmMsg += "Start rendering now?";
+            confirmMsg += "Rendering will start in an external terminal.\nYou can continue working in After Effects.\n\nLaunch background render now?";
 
             if (confirm(confirmMsg)) {
-                setup.renderQueue.render();
-                ftpLocationDropdown.selection = 1;
+                if (launchExternalRender(setup, null)) {
+                    ftpLocationDropdown.selection = 1;
+                    alert("Background render launched!\n\n" +
+                          "Check the Terminal window for progress.\n" +
+                          "You can continue working in After Effects.");
+                }
             } else if (!clipboardSuccess) {
                 showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath);
             }
@@ -1564,24 +1568,7 @@
                 return;
             }
 
-            var clipboardSuccess = copyToClipboard(setup.simplifiedPath);
-
-            var confirmMsg = "Create Folders, Render and Upload\n\n";
-            confirmMsg += "Output folder:\n" + setup.simplifiedPath + "\n\n";
-            confirmMsg += "Active items: " + setup.activeItems.length + "\n";
-            confirmMsg += "Output modules updated: " + setup.outputCount + "\n\n";
-            confirmMsg += "FTP: " + ftpConfig.hostname + "\n\n";
-            if (clipboardSuccess) { confirmMsg += "Path copied to clipboard!\n\n"; }
-            confirmMsg += "Start rendering and upload to FTP now?";
-
-            if (!confirm(confirmMsg)) {
-                if (!clipboardSuccess) { showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath); }
-                return;
-            }
-
-            setup.renderQueue.render();
-            ftpLocationDropdown.selection = 1;
-
+            // Pre-test FTP connection before launching background process
             progressOverallBar.value    = 0;
             progressOverallLabel.text   = "Testing FTP connection...";
             progressStatusText.text     = "";
@@ -1589,60 +1576,39 @@
 
             var connTest = testFTPConnection(ftpConfig);
             if (!connTest.success) {
-                alert("Render complete, but FTP connection failed.\n\n" +
+                alert("FTP connection failed.\n\n" +
                       "Host: " + ftpConfig.hostname + "\n" +
                       "User: " + ftpConfig.username + "\n\n" +
                       "Error:\n" + connTest.error + "\n\n" +
-                      "Upload aborted. Files are in:\n" + setup.timeFolderPath);
+                      "Please check your connection settings.");
                 progressOverallLabel.text = "";
-                progressStatusText.text   = "Upload aborted — connection failed";
+                progressStatusText.text   = "FTP connection failed";
+                return;
+            }
+            progressOverallLabel.text = "";
+            progressStatusText.text   = "";
+
+            var clipboardSuccess = copyToClipboard(setup.simplifiedPath);
+
+            var confirmMsg = "Create Folders, Render and Upload\n\n";
+            confirmMsg += "Output folder:\n" + setup.simplifiedPath + "\n\n";
+            confirmMsg += "Active items: " + setup.activeItems.length + "\n";
+            confirmMsg += "Output modules updated: " + setup.outputCount + "\n\n";
+            confirmMsg += "FTP: " + ftpConfig.hostname + " (connection verified)\n\n";
+            if (clipboardSuccess) { confirmMsg += "Path copied to clipboard!\n\n"; }
+            confirmMsg += "Rendering and upload will start in an external terminal.\nYou can continue working in After Effects.\n\nLaunch now?";
+
+            if (!confirm(confirmMsg)) {
+                if (!clipboardSuccess) { showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath); }
                 return;
             }
 
-            progressOverallLabel.text = "Scanning rendered files...";
-            panel.layout.layout(true);
-
-            var timeFolderObj  = new Folder(setup.timeFolderPath);
-            var renderedFiles  = [];
-            scanFolderForFiles(timeFolderObj, setup.timeFolderPath, renderedFiles);
-
-            if (renderedFiles.length === 0) {
-                alert("Render complete, but no files found in output folder:\n" + setup.timeFolderPath + "\n\nFTP upload skipped.");
-                progressOverallLabel.text = "";
-                progressStatusText.text   = "";
-                return;
+            if (launchExternalRender(setup, ftpConfig)) {
+                ftpLocationDropdown.selection = 1;
+                alert("Background render & upload launched!\n\n" +
+                      "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
+                      "You can continue working in After Effects.");
             }
-
-            var remoteTimePath = FTP_OUTPUT_PATH +
-                (setup.renderSubProject ? "/" + setup.renderSubProject : "") +
-                "/" + setup.dateFolder + "/" + setup.timeFolder;
-
-            var totalFiles = renderedFiles.length;
-            var uploaded   = 0;
-            var errors     = 0;
-
-            for (var i = 0; i < renderedFiles.length; i++) {
-                var fileInfo       = renderedFiles[i];
-                var remoteFilePath = remoteTimePath + "/" + fileInfo.relativePath;
-
-                progressOverallBar.value  = (i / totalFiles) * 100;
-                progressOverallLabel.text = "Uploading " + (i + 1) + " / " + totalFiles;
-                progressStatusText.text   = fileInfo.relativePath;
-                panel.layout.layout(true);
-
-                var success = uploadFTPFile(ftpConfig, fileInfo.file.fsName, remoteFilePath);
-                if (success) { uploaded++; } else { errors++; }
-            }
-
-            progressOverallBar.value  = 100;
-            progressOverallLabel.text = "Complete: " + uploaded + " uploaded";
-            progressStatusText.text   = errors > 0 ? errors + " error(s)" : "All files uploaded";
-            panel.layout.layout(true);
-
-            alert("Render and Upload complete!\n\n" +
-                  "Uploaded: " + uploaded + " / " + totalFiles + " files\n" +
-                  (errors > 0 ? "Errors: " + errors + "\n" : "") +
-                  "\nRemote path:\n" + remoteTimePath);
 
         } catch (error) {
             alert("Error in Render and Upload:\n" + error.message + "\nLine: " + error.line);

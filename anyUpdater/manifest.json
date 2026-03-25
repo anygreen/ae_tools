@@ -4,10 +4,12 @@
     {
       "id": "aldi_project_helper",
       "name": "Aldi Project Helper",
-      "version": "2.1.3",
+      "version": "2.2.0",
       "files": [
         { "repo": "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx", "local": "Aldi_Project_Helper_V2.jsx" },
         { "repo": "Aldi_Project_Helper/_ftp.jsx",                   "local": "Aldi_Project_Helper/_ftp.jsx" },
+        { "repo": "Aldi_Project_Helper/_render_upload.sh",          "local": "Aldi_Project_Helper/_render_upload.sh" },
+        { "repo": "Aldi_Project_Helper/_render_upload.ps1",         "local": "Aldi_Project_Helper/_render_upload.ps1" },
         { "repo": "Aldi_Project_Helper/AldiProjectHelper_FTP.txt",  "local": "~/Documents/AldiProjectHelper_FTP.txt", "skipIfExists": true }
       ],
       "remove": [
