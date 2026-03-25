@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.0.9
+ * @version 2.1.0
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.0.9";
+    var SCRIPT_VERSION = "v2.1.0";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -31,6 +31,9 @@
     var FTP_CONFIG_FILE  = "~/Documents/AldiProjectHelper_FTP.txt";
 
     var IS_MAC = ($.os.indexOf("Mac") !== -1);
+
+    // FTP protocol mode — toggled by the UI dropdown, read by _ftp.jsx helpers
+    var USE_FTPS = true;
 
     // ============================================================
     // HELPER FUNCTIONS - General Utilities
@@ -759,6 +762,16 @@
     ftpCountDropdown.selection = 0;
     ftpCountDropdown.alignment = ["fill", "center"];
     ftpCountDropdown.helpTip   = "How many date folders to sync";
+
+    var ftpProtocolDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["FTPS", "FTP"]);
+    ftpProtocolDropdown.selection = (loadSetting("ftpProtocol", "FTPS") === "FTP") ? 1 : 0;
+    ftpProtocolDropdown.alignment = ["fill", "center"];
+    ftpProtocolDropdown.helpTip   = "FTPS: FTP over TLS (encrypted)\nFTP: plain FTP (unencrypted)";
+    USE_FTPS = (ftpProtocolDropdown.selection.index === 0);
+    ftpProtocolDropdown.onChange = function() {
+        USE_FTPS = (this.selection.index === 0);
+        saveSetting("ftpProtocol", this.selection.text);
+    };
 
     var ftpRestrictGroup = ec.add("group");
     ftpRestrictGroup.orientation   = "row";
