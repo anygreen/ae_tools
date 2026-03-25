@@ -8,7 +8,7 @@
  * The GitHub Personal Access Token is stored in AE preferences
  * and never written to any file or committed to the repository.
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 (function createUI(thisObj) {
 
@@ -17,7 +17,7 @@
     // ============================================================
 
     var SCRIPT_NAME   = "anyUpdater";
-    var SCRIPT_VERSION = "v1.1.0";
+    var SCRIPT_VERSION = "v1.1.1";
     var SETTINGS_KEY  = "anyUpdater";
     var PAT_SETTING   = "github_pat";
 
@@ -245,6 +245,10 @@
         log("writeFile: writing " + content.length + " bytes to " + file.fsName);
         ensureFolderExists(new Folder(file.parent.fsName));
         file.encoding = "UTF-8";
+        // On macOS, ExtendScript defaults to "Macintosh" line endings (bare CR),
+        // which is the old Classic Mac format.  Shell scripts and other text
+        // files must use Unix LF endings to work correctly on modern macOS.
+        file.lineFeed = "Unix";
         if (!file.open("w")) { throw new Error("Cannot write to: " + file.fsName); }
         file.write(content);
         file.close();

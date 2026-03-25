@@ -4,7 +4,7 @@
     {
       "id": "aldi_project_helper",
       "name": "Aldi Project Helper",
-      "version": "2.2.4",
+      "version": "2.2.5",
       "files": [
         { "repo": "Aldi_Project_Helper/Aldi_Project_Helper_V2.jsx", "local": "Aldi_Project_Helper_V2.jsx" },
         { "repo": "Aldi_Project_Helper/_ftp.jsx",                   "local": "Aldi_Project_Helper/_ftp.jsx" },
@@ -45,7 +45,7 @@
     {
       "id": "any_updater",
       "name": "anyUpdater",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "files": [
         { "repo": "anyUpdater/anyUpdater.jsx", "local": "anyUpdater.jsx" }
       ],

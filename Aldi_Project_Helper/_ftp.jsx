@@ -645,9 +645,11 @@
         lines.push("COMP_COUNT=" + compCount);
         lines.push("TOTAL_FRAMES=" + totalFrames);
 
-        // Write config file
+        // Write config file with Unix line endings (LF).
+        // ExtendScript on macOS defaults to "Macintosh" (bare CR) which bash cannot parse.
         var configFile = new File(configPath);
         configFile.encoding = "UTF-8";
+        configFile.lineFeed = "Unix";
         configFile.open("w");
         for (var i = 0; i < lines.length; i++) {
             configFile.writeln(lines[i]);
@@ -700,14 +702,19 @@
         // Launch in visible terminal
         try {
             if (IS_MAC) {
-                // Strip Windows line endings that may have been introduced during download
-                // (BSD sed on macOS doesn't support \r — use perl instead)
-                system.callSystem("perl -i -pe 's/\\r$//' \"" + helperPath + "\"");
+                // Fix line endings: anyUpdater's ExtendScript File.write() uses the
+                // "Macintosh" lineFeed default on macOS, producing bare CR (\r) instead
+                // of Unix LF (\n).  The tr command converts any \r to \n, handling both
+                // bare CR and CRLF (the latter becomes double \n, which is harmless).
+                system.callSystem('tr "\\r" "\\n" < "' + helperPath + '" > "' + helperPath + '.tmp" && mv "' + helperPath + '.tmp" "' + helperPath + '"');
                 // Make script executable
                 system.callSystem('chmod +x "' + helperPath + '"');
+                // Also fix config file line endings (written by ExtendScript writeln)
+                system.callSystem('tr "\\r" "\\n" < "' + configPath + '" > "' + configPath + '.tmp" && mv "' + configPath + '.tmp" "' + configPath + '"');
                 // Launch via osascript → Terminal.app
+                // Use "bash" explicitly to avoid shebang parsing issues as a safety net
                 var osaCmd = 'osascript -e \'tell application "Terminal"' +
-                             ' to do script "\\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
+                             ' to do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
                 system.callSystem(osaCmd);
             } else {
                 // Windows: use VBScript to launch PowerShell non-blocking
