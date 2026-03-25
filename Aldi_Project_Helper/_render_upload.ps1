@@ -498,7 +498,7 @@ if ($doUpload) {
         # Run curl in background, capturing progress (stderr) to file
         "" | Set-Content $curlProgress
 
-        $curlProcess = Start-Process -FilePath 'curl' `
+        $curlProcess = Start-Process -FilePath 'curl.exe' `
             -ArgumentList $argString `
             -RedirectStandardError $curlProgress `
             -NoNewWindow -PassThru

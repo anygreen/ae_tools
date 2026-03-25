@@ -117,7 +117,7 @@ function Get-FtpList([string]$remotePath) {
     $curlArgs = Get-CurlArgs
     $curlArgs += @('-l', $url)
     try {
-        $result = & curl @curlArgs 2>$null
+        $result = & curl.exe @curlArgs 2>$null
         if ($result) {
             return ($result -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
         }
@@ -199,7 +199,7 @@ $testArgs += @('-l', $testUrl)
 
 $testStderr = [System.IO.Path]::GetTempFileName()
 try {
-    $testResult = & curl @testArgs 2>$testStderr
+    $testResult = & curl.exe @testArgs 2>$testStderr
     if ($LASTEXITCODE -ne 0) {
         $errText = Get-Content $testStderr -Raw -ErrorAction SilentlyContinue
         throw "curl exit $LASTEXITCODE : $errText"
@@ -585,7 +585,7 @@ for ($ui = 0; $ui -lt $uploadCount; $ui++) {
 
     "" | Set-Content $curlProgress
 
-    $curlProcess = Start-Process -FilePath 'curl' `
+    $curlProcess = Start-Process -FilePath 'curl.exe' `
         -ArgumentList $argString `
         -RedirectStandardError $curlProgress `
         -NoNewWindow -PassThru
@@ -644,7 +644,7 @@ for ($di = 0; $di -lt $downloadCount; $di++) {
 
     "" | Set-Content $curlProgress
 
-    $curlProcess = Start-Process -FilePath 'curl' `
+    $curlProcess = Start-Process -FilePath 'curl.exe' `
         -ArgumentList $argString `
         -RedirectStandardError $curlProgress `
         -NoNewWindow -PassThru
