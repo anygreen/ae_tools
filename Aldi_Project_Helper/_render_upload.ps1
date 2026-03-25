@@ -71,8 +71,9 @@ $ftpPass     = $cfg['FTP_PASS']
 $useFtps     = $cfg['USE_FTPS'] -eq '1'
 $tlsFlags    = $cfg['TLS_FLAGS']
 $remoteBase  = $cfg['REMOTE_BASE']
-$compCount   = [int]$cfg['COMP_COUNT']
-$totalFrames = [int]$cfg['TOTAL_FRAMES']
+$compCount      = [int]$cfg['COMP_COUNT']
+$totalFrames    = [int]$cfg['TOTAL_FRAMES']
+$simplifiedPath = $cfg['SIMPLIFIED_PATH']
 
 $compNames  = @()
 $compFrames = @()
@@ -568,6 +569,9 @@ if ($doUpload) {
     }
 }
 Write-Host "  Total time: $(Format-Time $totalTime)"
+if ($simplifiedPath) {
+    Write-Host "  Output: $simplifiedPath"
+}
 Write-Host "  $sep"
 Write-Host ""
 

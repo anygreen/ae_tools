@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.17";
+    var SCRIPT_VERSION = "v2.2.18";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -758,13 +758,20 @@
     ftpCountDropdown.selection = 0;
     ftpCountDropdown.helpTip   = "How many date folders to sync";
 
-    var ftpProtocolDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 80, 25], ["FTPS", "FTP"]);
+    var ftpProtocolDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 70, 25], ["FTPS", "FTP"]);
     ftpProtocolDropdown.selection = (loadSetting("ftpProtocol", "FTPS") === "FTP") ? 1 : 0;
     ftpProtocolDropdown.helpTip   = "FTPS: FTP over TLS (encrypted)\nFTP: plain FTP (unencrypted)";
     USE_FTPS = (ftpProtocolDropdown.selection.index === 0);
     ftpProtocolDropdown.onChange = function() {
         USE_FTPS = (this.selection.index === 0);
         saveSetting("ftpProtocol", this.selection.text);
+    };
+
+    var ftpViaDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 60, 25], ["Ae", "CLI"]);
+    ftpViaDropdown.selection = (loadSetting("ftpVia", "Ae") === "CLI") ? 1 : 0;
+    ftpViaDropdown.helpTip   = "Ae: sync within After Effects (blocks UI)\nCLI: sync in external terminal (non-blocking)";
+    ftpViaDropdown.onChange = function() {
+        saveSetting("ftpVia", this.selection.text);
     };
 
     var ftpRestrictGroup = ec.add("group");
@@ -1541,6 +1548,10 @@
 
             if (confirm(confirmMsg)) {
                 if (launchExternalRender(setup, null)) {
+                    // Deactivate queued items so AE doesn't render them again
+                    for (var di = 0; di < setup.activeItems.length; di++) {
+                        setup.activeItems[di].render = false;
+                    }
                     ftpLocationDropdown.selection = 1;
                     alert("Background render launched!\n\n" +
                           "Check the Terminal window for progress.\n" +
@@ -1604,6 +1615,10 @@
             }
 
             if (launchExternalRender(setup, ftpConfig)) {
+                // Deactivate queued items so AE doesn't render them again
+                for (var di = 0; di < setup.activeItems.length; di++) {
+                    setup.activeItems[di].render = false;
+                }
                 ftpLocationDropdown.selection = 1;
                 alert("Background render & upload launched!\n\n" +
                       "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
@@ -1635,20 +1650,6 @@
             if (!ftpConfig) {
                 alert("No FTP connection configured for project:\n" + projectName +
                       "\n\nPlease add a connection in:\n" + FTP_CONFIG_FILE);
-                return;
-            }
-
-            progressStatusText.text = "Connecting to FTP...";
-            panel.layout.layout(true);
-
-            var connTest = testFTPConnection(ftpConfig);
-            if (!connTest.success) {
-                alert("FTP connection failed.\n\n" +
-                      "Host: " + ftpConfig.hostname + "\n" +
-                      "User: " + ftpConfig.username + "\n\n" +
-                      "Error:\n" + connTest.error + "\n\n" +
-                      "Sync aborted.");
-                progressStatusText.text = "Connection failed";
                 return;
             }
 
@@ -1712,6 +1713,34 @@
                 } else {
                     scanRoots.push({ localBase: localBasePath, remoteBase: syncPath, label: "output" });
                 }
+            }
+
+            // CLI mode: hand off to external terminal
+            if (ftpViaDropdown.selection.index === 1) {
+                progressStatusText.text = "";
+                panel.layout.layout(true);
+
+                if (launchExternalSync(ftpConfig, scanRoots, folderCount)) {
+                    alert("Background sync launched!\n\n" +
+                          "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
+                          "You can continue working in After Effects.");
+                }
+                return;
+            }
+
+            // Ae mode: sync within After Effects
+            progressStatusText.text = "Connecting to FTP...";
+            panel.layout.layout(true);
+
+            var connTest = testFTPConnection(ftpConfig);
+            if (!connTest.success) {
+                alert("FTP connection failed.\n\n" +
+                      "Host: " + ftpConfig.hostname + "\n" +
+                      "User: " + ftpConfig.username + "\n\n" +
+                      "Error:\n" + connTest.error + "\n\n" +
+                      "Sync aborted.");
+                progressStatusText.text = "Connection failed";
+                return;
             }
 
             progressStatusText.text = "Scanning folders...";

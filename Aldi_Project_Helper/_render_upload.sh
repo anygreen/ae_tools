@@ -32,6 +32,7 @@ TLS_FLAGS=""
 REMOTE_BASE=""
 COMP_COUNT="0"
 TOTAL_FRAMES="0"
+SIMPLIFIED_PATH=""
 
 COMP_NAMES=()
 COMP_FRAMES=()
@@ -62,6 +63,7 @@ while IFS='=' read -r key value; do
         REMOTE_BASE)    REMOTE_BASE="$value" ;;
         COMP_COUNT)     COMP_COUNT="$value" ;;
         TOTAL_FRAMES)   TOTAL_FRAMES="$value" ;;
+        SIMPLIFIED_PATH) SIMPLIFIED_PATH="$value" ;;
         COMP_*)
             idx="${key#COMP_}"
             cframes="${value##*::}"
@@ -573,6 +575,9 @@ if [ "$DO_UPLOAD" = "1" ]; then
     fi
 fi
 printf "  Total time: %s\n" "$(format_time $TOTAL_TIME)"
+if [ -n "$SIMPLIFIED_PATH" ]; then
+    printf "  Output: %s\n" "$SIMPLIFIED_PATH"
+fi
 echo "  ════════════════════════════════════════════════════"
 echo ""
 

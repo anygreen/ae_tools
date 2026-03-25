@@ -646,6 +646,7 @@
         }
         lines.push("COMP_COUNT=" + compCount);
         lines.push("TOTAL_FRAMES=" + totalFrames);
+        lines.push("SIMPLIFIED_PATH=" + setup.simplifiedPath);
 
         // Write config file with Unix line endings (LF).
         // ExtendScript on macOS defaults to "Macintosh" (bare CR) which bash cannot parse.
@@ -737,6 +738,118 @@
         } catch (e) {
             alert("Failed to launch background render:\n" + e.message);
             // Clean up config file on failure
+            try { new File(configPath).remove(); } catch(ex) {}
+            return false;
+        }
+    }
+
+    // ============================================================
+    // EXTERNAL FTP SYNC — background terminal launch
+    // ============================================================
+
+    /**
+     * Returns the path to the platform-specific FTP sync helper script.
+     * @returns {string|null} Path to helper script, or null if not found
+     */
+    function getSyncHelperScriptPath() {
+        var mainScript = new File($.fileName);
+        var parentFolder = mainScript.parent;
+        var scriptName = IS_MAC ? "_ftp_sync.sh" : "_ftp_sync.ps1";
+
+        var path1 = parentFolder.fsName + (IS_MAC ? "/" : "\\") +
+                     "Aldi_Project_Helper" + (IS_MAC ? "/" : "\\") + scriptName;
+        if (new File(path1).exists) return path1;
+
+        var path2 = parentFolder.fsName + (IS_MAC ? "/" : "\\") + scriptName;
+        if (new File(path2).exists) return path2;
+
+        return null;
+    }
+
+    /**
+     * Generates a temp config file for the external FTP sync script.
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {Array} scanRoots - Array of {localBase, remoteBase, label}
+     * @param {number} folderCount - Number of date folders to sync
+     * @returns {string} Path to the generated config file
+     */
+    function generateSyncConfig(ftpConfig, scanRoots, folderCount) {
+        var timestamp = new Date().getTime();
+        var tempDir = IS_MAC ? "/tmp" : Folder.temp.fsName;
+        var sep = IS_MAC ? "/" : "\\";
+        var configPath = tempDir + sep + "ae_sync_config_" + timestamp + ".txt";
+
+        var lines = [];
+        lines.push("FTP_HOST=" + ftpConfig.hostname);
+        lines.push("FTP_PORT=" + (ftpConfig.port || "21"));
+        lines.push("FTP_USER=" + ftpConfig.username);
+        lines.push("FTP_PASS=" + ftpConfig.password);
+        lines.push("USE_FTPS=" + (USE_FTPS ? "1" : "0"));
+        lines.push("TLS_FLAGS=" + getTLSFlags());
+        lines.push("FOLDER_COUNT=" + folderCount);
+        lines.push("SCAN_ROOT_COUNT=" + scanRoots.length);
+
+        for (var i = 0; i < scanRoots.length; i++) {
+            var idx = i + 1;
+            lines.push("SCAN_LOCAL_" + idx + "=" + scanRoots[i].localBase);
+            lines.push("SCAN_REMOTE_" + idx + "=" + scanRoots[i].remoteBase);
+            lines.push("SCAN_LABEL_" + idx + "=" + scanRoots[i].label);
+        }
+
+        var configFile = new File(configPath);
+        configFile.encoding = "UTF-8";
+        configFile.lineFeed = "Unix";
+        configFile.open("w");
+        for (var i = 0; i < lines.length; i++) {
+            configFile.writeln(lines[i]);
+        }
+        configFile.close();
+
+        return configPath;
+    }
+
+    /**
+     * Launches the external FTP sync script in a visible terminal window.
+     * @param {Object} ftpConfig - FTP connection config
+     * @param {Array} scanRoots - Array of {localBase, remoteBase, label}
+     * @param {number} folderCount - Number of date folders to sync
+     * @returns {boolean} True if launched successfully
+     */
+    function launchExternalSync(ftpConfig, scanRoots, folderCount) {
+        var helperPath = getSyncHelperScriptPath();
+        if (!helperPath) {
+            alert("Sync helper script not found.\n\n" +
+                  "Expected: _ftp_sync." + (IS_MAC ? "sh" : "ps1") +
+                  "\nin the Aldi_Project_Helper folder.\n\n" +
+                  "Please run anyUpdater to install the latest version.");
+            return false;
+        }
+
+        var configPath = generateSyncConfig(ftpConfig, scanRoots, folderCount);
+
+        try {
+            if (IS_MAC) {
+                system.callSystem("tr '\\015' '\\012' < \"" + helperPath + "\" > \"" + helperPath + ".tmp\" && mv \"" + helperPath + ".tmp\" \"" + helperPath + "\"");
+                system.callSystem('chmod +x "' + helperPath + '"');
+                system.callSystem("tr '\\015' '\\012' < \"" + configPath + "\" > \"" + configPath + ".tmp\" && mv \"" + configPath + ".tmp\" \"" + configPath + "\"");
+                var osaCmd = 'osascript -e \'tell application "Terminal"' +
+                             ' to do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
+                system.callSystem(osaCmd);
+            } else {
+                var tempDir = Folder.temp.fsName;
+                var vbsPath = tempDir + "\\ae_launch_sync.vbs";
+                var vbs = new File(vbsPath);
+                vbs.open("w");
+                vbs.writeln('Set objShell = CreateObject("WScript.Shell")');
+                vbs.writeln('objShell.Run "powershell -ExecutionPolicy Bypass -NoProfile -File ""' +
+                            helperPath + '"" ""' + configPath + '""", 1, False');
+                vbs.close();
+                system.callSystem('wscript //B "' + vbsPath + '"');
+                try { new File(vbsPath).remove(); } catch(ex) {}
+            }
+            return true;
+        } catch (e) {
+            alert("Failed to launch background sync:\n" + e.message);
             try { new File(configPath).remove(); } catch(ex) {}
             return false;
         }
