@@ -701,7 +701,8 @@
         try {
             if (IS_MAC) {
                 // Strip Windows line endings that may have been introduced during download
-                system.callSystem('sed -i "" "s/\\r$//" "' + helperPath + '"');
+                // (BSD sed on macOS doesn't support \r — use perl instead)
+                system.callSystem("perl -i -pe 's/\\r$//' \"" + helperPath + "\"");
                 // Make script executable
                 system.callSystem('chmod +x "' + helperPath + '"');
                 // Launch via osascript → Terminal.app
