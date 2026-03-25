@@ -14,9 +14,16 @@ if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-# Fix bare CR line endings from ExtendScript (macOS defaults to Classic Mac \r)
-# This makes the script self-contained — no reliance on the caller to fix line endings.
-tr "\r" "\n" < "$CONFIG_FILE" > "$CONFIG_FILE.tmp" && mv "$CONFIG_FILE.tmp" "$CONFIG_FILE"
+# Fix bare CR line endings from ExtendScript (macOS defaults to Classic Mac \r).
+# Use octal escapes (\015=CR, \012=LF) for maximum compatibility with BSD tr.
+tr '\015' '\012' < "$CONFIG_FILE" > "${CONFIG_FILE}.fixed"
+mv "${CONFIG_FILE}.fixed" "$CONFIG_FILE"
+
+# Debug: show config file diagnostics (remove after confirming it works)
+echo "  [debug] Config file: $CONFIG_FILE"
+echo "  [debug] Config size: $(wc -c < "$CONFIG_FILE" | tr -d ' ') bytes, $(wc -l < "$CONFIG_FILE" | tr -d ' ') lines"
+echo "  [debug] First line:  $(head -1 "$CONFIG_FILE")"
+echo ""
 
 AERENDER=""
 PROJECT=""

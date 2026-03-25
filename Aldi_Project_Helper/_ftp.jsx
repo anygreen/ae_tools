@@ -706,11 +706,12 @@
                 // "Macintosh" lineFeed default on macOS, producing bare CR (\r) instead
                 // of Unix LF (\n).  The tr command converts any \r to \n, handling both
                 // bare CR and CRLF (the latter becomes double \n, which is harmless).
-                system.callSystem('tr "\\r" "\\n" < "' + helperPath + '" > "' + helperPath + '.tmp" && mv "' + helperPath + '.tmp" "' + helperPath + '"');
+                // Use octal escapes (\015=CR, \012=LF) for BSD tr compatibility
+                system.callSystem("tr '\\015' '\\012' < \"" + helperPath + "\" > \"" + helperPath + ".tmp\" && mv \"" + helperPath + ".tmp\" \"" + helperPath + "\"");
                 // Make script executable
                 system.callSystem('chmod +x "' + helperPath + '"');
                 // Also fix config file line endings (written by ExtendScript writeln)
-                system.callSystem('tr "\\r" "\\n" < "' + configPath + '" > "' + configPath + '.tmp" && mv "' + configPath + '.tmp" "' + configPath + '"');
+                system.callSystem("tr '\\015' '\\012' < \"" + configPath + "\" > \"" + configPath + ".tmp\" && mv \"" + configPath + ".tmp\" \"" + configPath + "\"");
                 // Launch via osascript → Terminal.app
                 // Use "bash" explicitly to avoid shebang parsing issues as a safety net
                 var osaCmd = 'osascript -e \'tell application "Terminal"' +
