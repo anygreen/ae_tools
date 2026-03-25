@@ -92,12 +92,12 @@ for ($i = 1; $i -le $scanRootCount; $i++) {
 # HELPERS
 # ============================================================
 
-function Get-CurlBase {
-    $base = "curl -sS --user `"${ftpUser}:${ftpPass}`" --max-time 30"
+function Get-CurlArgs {
+    $args_ = @('-sS', '--user', "${ftpUser}:${ftpPass}", '--max-time', '30')
     if ($useFtps -and $tlsFlags) {
-        $base = "$base $tlsFlags"
+        $args_ += ($tlsFlags -split '\s+')
     }
-    return $base
+    return $args_
 }
 
 function Get-FtpUrl([string]$path) {
@@ -114,9 +114,10 @@ function Test-SkipFile([string]$name) {
 
 function Get-FtpList([string]$remotePath) {
     $url = Get-FtpUrl "$remotePath/"
-    $cmd = "$(Get-CurlBase) -l `"$url`""
+    $curlArgs = Get-CurlArgs
+    $curlArgs += @('-l', $url)
     try {
-        $result = Invoke-Expression $cmd 2>$null
+        $result = & curl @curlArgs 2>$null
         if ($result) {
             return ($result -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_.Length -gt 0 })
         }
@@ -189,18 +190,35 @@ Write-Host ""
 Write-Host -NoNewline "  Testing connection... "
 
 $testUrl = Get-FtpUrl ""
-$testCmd = "$(Get-CurlBase) -l `"$testUrl`""
+# Build argument list for direct curl invocation (avoids Invoke-Expression issues)
+$testArgs = @('-sS', '--user', "${ftpUser}:${ftpPass}", '--max-time', '30', '--connect-timeout', '10')
+if ($useFtps -and $tlsFlags) {
+    $testArgs += ($tlsFlags -split '\s+')
+}
+$testArgs += @('-l', $testUrl)
+
+$testStderr = [System.IO.Path]::GetTempFileName()
 try {
-    $testResult = Invoke-Expression $testCmd 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Connection failed" }
+    $testResult = & curl @testArgs 2>$testStderr
+    if ($LASTEXITCODE -ne 0) {
+        $errText = Get-Content $testStderr -Raw -ErrorAction SilentlyContinue
+        throw "curl exit $LASTEXITCODE : $errText"
+    }
     Write-Host "${GREEN}OK${RESET}"
 } catch {
     Write-Host "${RED}FAILED${RESET}"
     Write-Host ""
-    Write-Host "  Error: $testResult"
+    $errDetail = $_.Exception.Message
+    if (-not $errDetail) {
+        $errDetail = Get-Content $testStderr -Raw -ErrorAction SilentlyContinue
+    }
+    Write-Host "  Error: $errDetail"
     Write-Host ""
+    Remove-Item $testStderr -ErrorAction SilentlyContinue
     Read-Host "  Press Enter to close"
     exit 1
+} finally {
+    Remove-Item $testStderr -ErrorAction SilentlyContinue
 }
 Write-Host ""
 
