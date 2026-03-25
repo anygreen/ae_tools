@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.23";
+    var SCRIPT_VERSION = "v2.2.24";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1619,7 +1619,6 @@
                 for (var di = 0; di < setup.activeItems.length; di++) {
                     setup.activeItems[di].render = false;
                 }
-                ftpLocationDropdown.selection = 1;
                 alert("Background render & upload launched!\n\n" +
                       "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
                       "You can continue working in After Effects.");
