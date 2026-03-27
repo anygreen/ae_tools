@@ -8,9 +8,31 @@
 # ============================================================
 
 CONFIG_FILE="$1"
+
+# Helper: bring Terminal to front, wait for Enter, then close window
+wait_and_close() {
+    osascript -e 'tell application "Terminal" to activate' 2>/dev/null
+    read -p "  Press Enter to close..."
+    local my_tty
+    my_tty=$(tty 2>/dev/null)
+    if [ -n "$my_tty" ]; then
+        osascript -e "
+tell application \"Terminal\"
+    repeat with w in windows
+        repeat with t in tabs of w
+            if tty of t is \"$my_tty\" then
+                close w
+                return
+            end if
+        end repeat
+    end repeat
+end tell" 2>/dev/null &
+    fi
+}
+
 if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: Config file not found: $CONFIG_FILE"
-    read -p "Press Enter to close..."
+    wait_and_close
     exit 1
 fi
 
@@ -278,7 +300,7 @@ if [ "$RENDER_EXIT" -ne 0 ]; then
     tail -20 "$RENDER_LOG" | sed 's/^/  /'
     echo "  ────────────────────────────────────────"
     echo ""
-    read -p "  Press Enter to close..."
+    wait_and_close
     exit 1
 fi
 
@@ -299,7 +321,7 @@ if [ "$DO_UPLOAD" = "1" ]; then
     if [ "$FILE_COUNT" -eq 0 ]; then
         printf "  ${YELLOW}No rendered files found in output folder.${RESET}\n"
         printf "  Upload skipped.\n\n"
-        read -p "  Press Enter to close..."
+        wait_and_close
         exit 0
     fi
 
@@ -583,4 +605,4 @@ echo ""
 
 # Cleanup handled by EXIT trap
 
-read -p "  Press Enter to close..."
+wait_and_close

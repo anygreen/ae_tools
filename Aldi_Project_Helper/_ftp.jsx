@@ -717,8 +717,10 @@
                 system.callSystem("tr '\\015' '\\012' < \"" + configPath + "\" > \"" + configPath + ".tmp\" && mv \"" + configPath + ".tmp\" \"" + configPath + "\"");
                 // Launch via osascript → Terminal.app
                 // Use "bash" explicitly to avoid shebang parsing issues as a safety net
-                var osaCmd = 'osascript -e \'tell application "Terminal"' +
-                             ' to do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
+                // "activate" brings Terminal to the front immediately
+                var osaCmd = 'osascript -e \'tell application "Terminal"\n' +
+                             'do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\n' +
+                             'activate\nend tell\'';
                 system.callSystem(osaCmd);
             } else {
                 // Windows: use VBScript to launch PowerShell non-blocking
@@ -832,8 +834,10 @@
                 system.callSystem("tr '\\015' '\\012' < \"" + helperPath + "\" > \"" + helperPath + ".tmp\" && mv \"" + helperPath + ".tmp\" \"" + helperPath + "\"");
                 system.callSystem('chmod +x "' + helperPath + '"');
                 system.callSystem("tr '\\015' '\\012' < \"" + configPath + "\" > \"" + configPath + ".tmp\" && mv \"" + configPath + ".tmp\" \"" + configPath + "\"");
-                var osaCmd = 'osascript -e \'tell application "Terminal"' +
-                             ' to do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\'';
+                // "activate" brings Terminal to the front immediately
+                var osaCmd = 'osascript -e \'tell application "Terminal"\n' +
+                             'do script "bash \\"' + helperPath + '\\" \\"' + configPath + '\\""\n' +
+                             'activate\nend tell\'';
                 system.callSystem(osaCmd);
             } else {
                 var tempDir = Folder.temp.fsName;

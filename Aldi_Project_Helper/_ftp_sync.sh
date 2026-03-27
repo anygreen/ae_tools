@@ -8,9 +8,31 @@
 # ============================================================
 
 CONFIG_FILE="$1"
+
+# Helper: bring Terminal to front, wait for Enter, then close window
+wait_and_close() {
+    osascript -e 'tell application "Terminal" to activate' 2>/dev/null
+    read -p "  Press Enter to close..."
+    local my_tty
+    my_tty=$(tty 2>/dev/null)
+    if [ -n "$my_tty" ]; then
+        osascript -e "
+tell application \"Terminal\"
+    repeat with w in windows
+        repeat with t in tabs of w
+            if tty of t is \"$my_tty\" then
+                close w
+                return
+            end if
+        end repeat
+    end repeat
+end tell" 2>/dev/null &
+    fi
+}
+
 if [ -z "$CONFIG_FILE" ] || [ ! -f "$CONFIG_FILE" ]; then
     echo "ERROR: Config file not found: $CONFIG_FILE"
-    read -p "Press Enter to close..."
+    wait_and_close
     exit 1
 fi
 
@@ -252,7 +274,7 @@ if [ $TEST_EXIT -ne 0 ]; then
     echo ""
     echo "  Error: $TEST_RESULT"
     echo ""
-    read -p "  Press Enter to close..."
+    wait_and_close
     exit 1
 fi
 printf "${GREEN}OK${RESET}\n"
@@ -369,7 +391,7 @@ TOTAL_COUNT=$((UPLOAD_COUNT + DOWNLOAD_COUNT))
 if [ "$TOTAL_COUNT" -eq 0 ]; then
     printf "  ${GREEN}Everything is already in sync!${RESET}\n"
     echo ""
-    read -p "  Press Enter to close..."
+    wait_and_close
     exit 0
 fi
 
@@ -425,7 +447,7 @@ echo ""
 
 read -p "  Proceed? [Y/n] " CONFIRM
 case "$CONFIRM" in
-    [nN]*) echo "  Cancelled."; read -p "  Press Enter to close..."; exit 0 ;;
+    [nN]*) echo "  Cancelled."; wait_and_close; exit 0 ;;
 esac
 
 # ============================================================
@@ -798,4 +820,4 @@ printf "  Total time: %s\n" "$(format_time $TOTAL_TIME)"
 echo "  ════════════════════════════════════════════════════"
 echo ""
 
-read -p "  Press Enter to close..."
+wait_and_close
