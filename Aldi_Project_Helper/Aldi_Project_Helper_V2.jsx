@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.26";
+    var SCRIPT_VERSION = "v2.2.27";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -628,7 +628,7 @@
     projectDropdownGroup.alignment     = ["fill", "top"];
     projectDropdownGroup.alignChildren = ["fill", "center"];
 
-    var projectDropdown = projectDropdownGroup.add("dropdownlist", [0, 0, 100, 25], []);
+    var projectDropdown = projectDropdownGroup.add("dropdownlist", undefined, []);
 
     var projectButtonGroup = projectDropdownGroup.add("group");
     projectButtonGroup.orientation = "row";
@@ -649,7 +649,7 @@
     subProjectGroup.alignChildren = ["fill", "top"];
 
     var subProjectLabel   = subProjectGroup.add("statictext", undefined, "Sub-project:");
-    var subProjectDropdown = subProjectGroup.add("dropdownlist", [0, 0, 100, 25], ["(No sub-projects)"]);
+    var subProjectDropdown = subProjectGroup.add("dropdownlist", undefined, ["(No sub-projects)"]);
     subProjectDropdown.selection = 0;
     subProjectDropdown.enabled   = false;
 
@@ -748,17 +748,17 @@
     var ftpDropdownGroup = ec.add("group");
     ftpDropdownGroup.orientation   = "row";
     ftpDropdownGroup.alignment     = ["fill", "top"];
-    ftpDropdownGroup.alignChildren = ["fill", "center"];
+    ftpDropdownGroup.alignChildren = ["left", "center"];
 
-    var ftpLocationDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 90, 25], ["Input", "Output"]);
+    var ftpLocationDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["Input", "Output"]);
     ftpLocationDropdown.selection = 0;
     ftpLocationDropdown.helpTip   = "Input: 01_inbox folder\nOutput: 06_vfx/03_out folder";
 
-    var ftpCountDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 90, 25], ["Latest", "Latest 5"]);
+    var ftpCountDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["Latest", "Latest 5"]);
     ftpCountDropdown.selection = 0;
     ftpCountDropdown.helpTip   = "How many date folders to sync";
 
-    var ftpProtocolDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 70, 25], ["FTPS", "FTP"]);
+    var ftpProtocolDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["FTPS", "FTP"]);
     ftpProtocolDropdown.selection = (loadSetting("ftpProtocol", "FTPS") === "FTP") ? 1 : 0;
     ftpProtocolDropdown.helpTip   = "FTPS: FTP over TLS (encrypted)\nFTP: plain FTP (unencrypted)";
     USE_FTPS = (ftpProtocolDropdown.selection.index === 0);
@@ -767,7 +767,7 @@
         saveSetting("ftpProtocol", this.selection.text);
     };
 
-    var ftpViaDropdown = ftpDropdownGroup.add("dropdownlist", [0, 0, 60, 25], ["Ae", "CLI"]);
+    var ftpViaDropdown = ftpDropdownGroup.add("dropdownlist", undefined, ["Ae", "CLI"]);
     ftpViaDropdown.selection = (loadSetting("ftpVia", "Ae") === "CLI") ? 1 : 0;
     ftpViaDropdown.helpTip   = "Ae: sync within After Effects (blocks UI)\nCLI: sync in external terminal (non-blocking)";
     ftpViaDropdown.onChange = function() {
@@ -1457,7 +1457,7 @@
                     spDialog.spacing       = 10;
                     spDialog.margins       = 16;
                     spDialog.add("statictext", undefined, "Sub-projects detected. Select output sub-project:");
-                    var spDropdown = spDialog.add("dropdownlist", [0, 0, 250, 25], currentSubProjects);
+                    var spDropdown = spDialog.add("dropdownlist", undefined, currentSubProjects);
                     spDropdown.selection = 0;
                     var spBtnGroup = spDialog.add("group");
                     spBtnGroup.orientation = "row";
