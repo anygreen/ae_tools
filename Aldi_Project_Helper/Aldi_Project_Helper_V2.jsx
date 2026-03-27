@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.25";
+    var SCRIPT_VERSION = "v2.2.26";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1553,9 +1553,6 @@
                         setup.activeItems[di].render = false;
                     }
                     ftpLocationDropdown.selection = 1;
-                    alert("Background render launched!\n\n" +
-                          "Check the Terminal window for progress.\n" +
-                          "You can continue working in After Effects.");
                 }
             } else if (!clipboardSuccess) {
                 showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath);
@@ -1619,9 +1616,6 @@
                 for (var di = 0; di < setup.activeItems.length; di++) {
                     setup.activeItems[di].render = false;
                 }
-                alert("Background render & upload launched!\n\n" +
-                      "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
-                      "You can continue working in After Effects.");
             }
 
         } catch (error) {
@@ -1719,11 +1713,7 @@
                 progressStatusText.text = "";
                 panel.layout.layout(true);
 
-                if (launchExternalSync(ftpConfig, scanRoots, folderCount)) {
-                    alert("Background sync launched!\n\n" +
-                          "Check the " + (IS_MAC ? "Terminal" : "PowerShell") + " window for progress.\n" +
-                          "You can continue working in After Effects.");
-                }
+                launchExternalSync(ftpConfig, scanRoots, folderCount);
                 return;
             }
 
