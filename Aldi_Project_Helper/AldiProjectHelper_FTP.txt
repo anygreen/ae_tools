@@ -41,3 +41,11 @@ username=lennert_exchange_preisoff
 password=78bddZtds
 port=21
 [/CONNECTION]
+
+[CONNECTION]
+project_folder=2601_Telekom_WM_DOOH
+hostname=fra-clients.acht.studio
+username=wm_lennert_exchange
+password=2089bdfTzd8
+port=21
+[/CONNECTION]
