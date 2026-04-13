@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.28";
+    var SCRIPT_VERSION = "v2.2.29";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -172,31 +172,31 @@
     function detectSubProjects(aeFolder) {
         if (!aeFolder.exists) return [];
 
-        var subProjects = [];
         var items = aeFolder.getFiles();
 
-        var hasDirectKW = false;
+        // If there are AEP files or KW folders directly in the ae folder,
+        // this is a flat or KW-only project — no sub-projects
         for (var i = 0; i < items.length; i++) {
-            if (items[i] instanceof Folder && isValidKW(items[i].name)) { hasDirectKW = true; break; }
+            if (items[i] instanceof Folder && isValidKW(items[i].name)) return [];
+            if (items[i] instanceof File && items[i].name.toLowerCase().match(/\.aep$/)) return [];
         }
-        if (hasDirectKW) return [];
 
+        // Otherwise look for sub-project folders that themselves contain KW folders or AEP files
+        var subProjects = [];
         for (var i = 0; i < items.length; i++) {
             var item = items[i];
-            if (item instanceof Folder) {
-                var shouldExclude = false;
-                for (var j = 0; j < EXCLUDED_FOLDERS.length; j++) {
-                    if (item.name === EXCLUDED_FOLDERS[j]) { shouldExclude = true; break; }
-                }
-                if (!shouldExclude) {
-                    var subItems = item.getFiles();
-                    var containsKWOrAEP = false;
-                    for (var k = 0; k < subItems.length; k++) {
-                        if (subItems[k] instanceof Folder && isValidKW(subItems[k].name)) { containsKWOrAEP = true; break; }
-                        if (subItems[k] instanceof File && subItems[k].name.toLowerCase().match(/\.aep$/)) { containsKWOrAEP = true; break; }
-                    }
-                    if (containsKWOrAEP) { subProjects.push(item.name); }
-                }
+            if (!(item instanceof Folder)) continue;
+
+            var shouldExclude = false;
+            for (var j = 0; j < EXCLUDED_FOLDERS.length; j++) {
+                if (item.name === EXCLUDED_FOLDERS[j]) { shouldExclude = true; break; }
+            }
+            if (shouldExclude) continue;
+
+            var subItems = item.getFiles();
+            for (var k = 0; k < subItems.length; k++) {
+                if (subItems[k] instanceof Folder && isValidKW(subItems[k].name)) { subProjects.push(item.name); break; }
+                if (subItems[k] instanceof File && subItems[k].name.toLowerCase().match(/\.aep$/)) { subProjects.push(item.name); break; }
             }
         }
 
