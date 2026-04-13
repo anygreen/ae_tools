@@ -111,6 +111,16 @@ CLR="\033[K"
 
 BAR_WIDTH=40
 
+# URL-encode a path component (preserve slashes) — matches _ftp_sync.sh
+url_encode_path() {
+    local path="$1"
+    if command -v python3 >/dev/null 2>&1; then
+        python3 -c "import sys, urllib.parse; print('/'.join(urllib.parse.quote(p, safe='') for p in sys.argv[1].split('/')))" "$path"
+    else
+        echo "$path"
+    fi
+}
+
 draw_bar() {
     local current=$1
     local max=$2
@@ -494,7 +504,8 @@ if [ "$DO_UPLOAD" = "1" ]; then
         fi
 
         # Generate curl command script (heredoc expands vars at write time)
-        uf_url="ftp://${FTP_HOST}:${FTP_PORT}/${uf_remote}"
+        uf_encoded=$(url_encode_path "$uf_remote")
+        uf_url="ftp://${FTP_HOST}:${FTP_PORT}/${uf_encoded}"
         echo "255" > "$CURL_EXIT_FILE"
         cat > "$CURL_CMD" << CURLEOF
 #!/bin/bash
