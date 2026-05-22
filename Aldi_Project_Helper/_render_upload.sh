@@ -43,6 +43,7 @@ mv "${CONFIG_FILE}.fixed" "$CONFIG_FILE"
 
 AERENDER=""
 PROJECT=""
+DELETE_PROJECT_AFTER="0"
 OUTPUT_FOLDER=""
 DO_UPLOAD="0"
 FTP_HOST=""
@@ -60,12 +61,18 @@ COMP_NAMES=()
 COMP_FRAMES=()
 COMP_STATUS=()
 
-# Ensure credentials are cleaned up on exit, interrupt, or terminal close
+# Ensure credentials are cleaned up on exit, interrupt, or terminal close.
+# Also deletes the _renderTMP project file when DELETE_PROJECT_AFTER=1, so the
+# launching script can safely save over the original .aep without affecting the
+# copy we're rendering.
 cleanup() {
     printf "\033[?7h" 2>/dev/null   # re-enable line wrapping
     [ -n "$CURL_PID" ] && kill "$CURL_PID" 2>/dev/null
     rm -f "$CONFIG_FILE" "$RENDER_LOG" "$FILE_LIST" "$NETRC_FILE" \
           "$CURL_PROGRESS" "$CURL_EXIT_FILE" "$CURL_CMD" 2>/dev/null
+    if [ "$DELETE_PROJECT_AFTER" = "1" ] && [ -n "$PROJECT" ] && [ -f "$PROJECT" ]; then
+        rm -f "$PROJECT" 2>/dev/null
+    fi
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -74,6 +81,7 @@ while IFS='=' read -r key value; do
     case "$key" in
         AERENDER)       AERENDER="$value" ;;
         PROJECT)        PROJECT="$value" ;;
+        DELETE_PROJECT_AFTER) DELETE_PROJECT_AFTER="$value" ;;
         OUTPUT_FOLDER)  OUTPUT_FOLDER="$value" ;;
         DO_UPLOAD)      DO_UPLOAD="$value" ;;
         FTP_HOST)       FTP_HOST="$value" ;;

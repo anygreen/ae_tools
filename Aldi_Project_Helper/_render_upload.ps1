@@ -11,11 +11,16 @@ param(
 # SETUP
 # ============================================================
 
-# Ensure credentials and temp files are cleaned up on exit or interruption
+# Ensure credentials and temp files are cleaned up on exit or interruption.
+# Also deletes the _renderTMP project file when DELETE_PROJECT_AFTER=1, so the
+# launching script can safely save over the original .aep without affecting the
+# copy we're rendering.
 $renderLogGlobal = $null
 $netrcFileGlobal = $null
 $curlProgressGlobal = $null
 $curlExitFileGlobal = $null
+$projectGlobal = $null
+$deleteProjectAfterGlobal = $false
 Register-EngineEvent PowerShell.Exiting -Action {
     Write-Host "$([char]27)[?7h" -NoNewline 2>$null   # re-enable line wrapping
     foreach ($f in @($ConfigPath, $renderLogGlobal, "$renderLogGlobal.err",
@@ -23,6 +28,9 @@ Register-EngineEvent PowerShell.Exiting -Action {
         if ($f -and (Test-Path $f -ErrorAction SilentlyContinue)) {
             Remove-Item $f -ErrorAction SilentlyContinue
         }
+    }
+    if ($deleteProjectAfterGlobal -and $projectGlobal -and (Test-Path $projectGlobal -ErrorAction SilentlyContinue)) {
+        Remove-Item $projectGlobal -ErrorAction SilentlyContinue
     }
 } | Out-Null
 
@@ -61,6 +69,9 @@ Get-Content $ConfigPath | ForEach-Object {
 
 $aerender    = $cfg['AERENDER']
 $project     = $cfg['PROJECT']
+$deleteProjectAfter = $cfg['DELETE_PROJECT_AFTER'] -eq '1'
+$projectGlobal = $project
+$deleteProjectAfterGlobal = $deleteProjectAfter
 $outputFolder = $cfg['OUTPUT_FOLDER']
 $doUpload    = $cfg['DO_UPLOAD'] -eq '1'
 $ftpHost     = $cfg['FTP_HOST']
@@ -289,6 +300,9 @@ if ($renderExit -ne 0) {
     Remove-Item $renderLog -ErrorAction SilentlyContinue
     Remove-Item "$renderLog.err" -ErrorAction SilentlyContinue
     Remove-Item $ConfigPath -ErrorAction SilentlyContinue
+    if ($deleteProjectAfter -and $project -and (Test-Path $project -ErrorAction SilentlyContinue)) {
+        Remove-Item $project -ErrorAction SilentlyContinue
+    }
     Read-Host "  Press Enter to close"
     exit 1
 }
@@ -577,5 +591,8 @@ Write-Host ""
 
 # Cleanup
 Remove-Item $ConfigPath -ErrorAction SilentlyContinue
+if ($deleteProjectAfter -and $project -and (Test-Path $project -ErrorAction SilentlyContinue)) {
+    Remove-Item $project -ErrorAction SilentlyContinue
+}
 
 Read-Host "  Press Enter to close"

@@ -598,9 +598,10 @@
      * Generates a temp config file for the external render/upload script.
      * @param {Object} setup - Result from setupRenderOutput()
      * @param {Object|null} ftpConfig - FTP connection config, or null for render-only
+     * @param {string} renderProjectPath - Path to the .aep file aerender should open (the _renderTMP copy)
      * @returns {string} Path to the generated config file
      */
-    function generateRenderConfig(setup, ftpConfig) {
+    function generateRenderConfig(setup, ftpConfig, renderProjectPath) {
         var timestamp = new Date().getTime();
         // On Mac, Folder.temp points to a sandbox-protected TemporaryItems directory
         // that Terminal/bash cannot read. Use /tmp instead which is universally accessible.
@@ -609,11 +610,11 @@
         var configPath = tempDir + sep + "ae_render_config_" + timestamp + ".txt";
 
         var aerenderPath = getAerenderPath();
-        var projectPath = app.project.file.fsName;
 
         var lines = [];
         lines.push("AERENDER=" + aerenderPath);
-        lines.push("PROJECT=" + projectPath);
+        lines.push("PROJECT=" + renderProjectPath);
+        lines.push("DELETE_PROJECT_AFTER=1");
         lines.push("OUTPUT_FOLDER=" + setup.timeFolderPath);
 
         if (ftpConfig) {
@@ -666,11 +667,16 @@
      * Launches the external render (and optionally upload) script in a visible
      * terminal window. Returns immediately — AE stays responsive.
      *
+     * The caller is responsible for writing the _renderTMP copy of the project
+     * to disk before calling this (see renderBtn/renderAndUploadBtn handlers).
+     * The external script deletes that copy when done.
+     *
      * @param {Object} setup - Result from setupRenderOutput()
      * @param {Object|null} ftpConfig - FTP config, or null for render-only
+     * @param {string} renderProjectPath - Absolute path to the _renderTMP .aep file aerender should open
      * @returns {boolean} True if launched successfully
      */
-    function launchExternalRender(setup, ftpConfig) {
+    function launchExternalRender(setup, ftpConfig, renderProjectPath) {
         // Validate aerender
         var aerenderPath = getAerenderPath();
         if (!aerenderPath) {
@@ -691,16 +697,13 @@
             return false;
         }
 
-        // Save the project so aerender can open the saved state
-        if (!app.project.file) {
-            alert("Please save the project first.\n\n" +
-                  "The background renderer needs a saved .aep file to work with.");
+        if (!renderProjectPath || !new File(renderProjectPath).exists) {
+            alert("Render copy of the project not found:\n" + renderProjectPath);
             return false;
         }
-        app.project.save();
 
         // Generate config file
-        var configPath = generateRenderConfig(setup, ftpConfig);
+        var configPath = generateRenderConfig(setup, ftpConfig, renderProjectPath);
 
         // Launch in visible terminal
         try {

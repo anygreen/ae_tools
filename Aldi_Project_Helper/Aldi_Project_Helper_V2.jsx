@@ -11,7 +11,7 @@
  * - FTP sync (input / output folders)
  * - Render queue output folder setup
  *
- * @version 2.2.8
+ * @version 2.3.1
  * @author Lennert
  */
 (function createUI(thisObj) {
@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.2.30";
+    var SCRIPT_VERSION = "v2.3.1";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1531,6 +1531,70 @@
         };
     }
 
+    /**
+     * Writes the project to a "<originalName>_renderTMP.aep" copy on disk
+     * while keeping the open project at its original path.
+     *
+     * Flow:
+     *   1. Save active-queue state to the original file
+     *   2. Copy that file to <name>_renderTMP.aep (aerender opens this copy)
+     *   3. Deactivate the queue items in the open project
+     *   4. Save the deactivated state back to the original file
+     *
+     * Result: the user's open file is safe to keep editing; aerender uses
+     * the untouched _renderTMP copy and deletes it when done.
+     *
+     * @param {Object} setup - Result from setupRenderOutput()
+     * @returns {string|null} Absolute path to the _renderTMP file, or null on failure
+     */
+    function prepareRenderTMPFile(setup) {
+        if (!app.project.file) {
+            alert("Please save the project first.\n\nThe background renderer needs a saved .aep file to work with.");
+            return null;
+        }
+
+        var originalFile = app.project.file;
+        var originalPath = originalFile.fsName;
+        var renderTMPPath = originalPath.replace(/\.aep$/i, "_renderTMP.aep");
+        var renderTMPFile = new File(renderTMPPath);
+
+        try {
+            app.project.save(originalFile);
+
+            if (renderTMPFile.exists) {
+                try { renderTMPFile.remove(); } catch (ex) {}
+            }
+            if (!originalFile.copy(renderTMPPath)) {
+                alert("Failed to create render copy:\n" + renderTMPPath);
+                return null;
+            }
+
+            for (var di = 0; di < setup.activeItems.length; di++) {
+                setup.activeItems[di].render = false;
+            }
+
+            app.project.save(originalFile);
+
+            return renderTMPPath;
+        } catch (e) {
+            alert("Error preparing render copy:\n" + e.message);
+            return null;
+        }
+    }
+
+    /**
+     * If launching the external render fails after prepareRenderTMPFile()
+     * deactivated the queue items, restore them so the user isn't left with
+     * a silently-disabled queue.
+     */
+    function restoreActiveItemsOnError(setup) {
+        try {
+            for (var i = 0; i < setup.activeItems.length; i++) {
+                setup.activeItems[i].render = true;
+            }
+        } catch (e) {}
+    }
+
     // Render button
     renderBtn.onClick = function() {
         try {
@@ -1547,12 +1611,15 @@
             confirmMsg += "Rendering will start in an external terminal.\nYou can continue working in After Effects.\n\nLaunch background render now?";
 
             if (confirm(confirmMsg)) {
-                if (launchExternalRender(setup, null)) {
-                    // Deactivate queued items so AE doesn't render them again
-                    for (var di = 0; di < setup.activeItems.length; di++) {
-                        setup.activeItems[di].render = false;
-                    }
+                var renderTMPPath = prepareRenderTMPFile(setup);
+                if (!renderTMPPath) return;
+
+                if (launchExternalRender(setup, null, renderTMPPath)) {
                     ftpLocationDropdown.selection = 1;
+                } else {
+                    // Launch failed — clean up the renderTMP copy and re-activate items
+                    try { new File(renderTMPPath).remove(); } catch (ex) {}
+                    restoreActiveItemsOnError(setup);
                 }
             } else if (!clipboardSuccess) {
                 showPathDialog("Output Path", "Copy the output path:", setup.simplifiedPath);
@@ -1611,11 +1678,13 @@
                 return;
             }
 
-            if (launchExternalRender(setup, ftpConfig)) {
-                // Deactivate queued items so AE doesn't render them again
-                for (var di = 0; di < setup.activeItems.length; di++) {
-                    setup.activeItems[di].render = false;
-                }
+            var renderTMPPath = prepareRenderTMPFile(setup);
+            if (!renderTMPPath) return;
+
+            if (!launchExternalRender(setup, ftpConfig, renderTMPPath)) {
+                // Launch failed — clean up the renderTMP copy and re-activate items
+                try { new File(renderTMPPath).remove(); } catch (ex) {}
+                restoreActiveItemsOnError(setup);
             }
 
         } catch (error) {
