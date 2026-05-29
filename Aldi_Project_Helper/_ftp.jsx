@@ -146,12 +146,25 @@
     }
 
     /**
-     * Checks if a folder name is a valid date format (YYMMDD - 6 digits)
+     * Checks if a folder name is a valid date folder. A date folder starts with a
+     * 6-digit YYMMDD date and may have an appended label after it (e.g. "260526" or
+     * "260526_MaFo"). The 6 digits must be followed by a non-digit or the end of the
+     * name, so "2605261" (7 digits) is not treated as a date folder.
      * @param {string} name - Folder name to check
      * @returns {boolean} True if valid date folder
      */
     function isDateFolder(name) {
-        return /^\d{6}$/.test(name);
+        return /^\d{6}(\D.*)?$/.test(name);
+    }
+
+    /**
+     * Returns the 6-digit YYMMDD date prefix of a date-folder name
+     * (e.g. "260526_MaFo" -> "260526"). Assumes the name passed isDateFolder().
+     * @param {string} name - Date folder name
+     * @returns {string} The 6-digit date prefix
+     */
+    function getDatePrefix(name) {
+        return name.substring(0, 6);
     }
 
     /**

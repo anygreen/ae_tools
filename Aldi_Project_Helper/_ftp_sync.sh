@@ -168,9 +168,11 @@ url_encode_path() {
     fi
 }
 
-# Check if a name is a date folder (YYMMDD)
+# Check if a name is a date folder. Starts with a 6-digit YYMMDD date, optionally
+# followed by an appended label (e.g. "260526" or "260526_MaFo"). The 6 digits must
+# be followed by a non-digit or end-of-name, so "2605261" is not a date folder.
 is_date_folder() {
-    [[ "$1" =~ ^[0-9]{6}$ ]]
+    [[ "$1" =~ ^[0-9]{6}([^0-9].*)?$ ]]
 }
 
 # Should skip file
@@ -319,7 +321,7 @@ for (( r=0; r<SCAN_ROOT_COUNT; r++ )); do
         IFS=$'\n' remote_dates=($(sort -r <<< "${remote_dates[*]}")); unset IFS
     fi
 
-    # Combine and deduplicate date folders, take latest N
+    # Combine and deduplicate date folders by full name
     combined_dates_str=""
     for d in "${local_dates[@]}" "${remote_dates[@]}"; do
         # Check if already in combined list
@@ -327,12 +329,34 @@ for (( r=0; r<SCAN_ROOT_COUNT; r++ )); do
             combined_dates_str="${combined_dates_str}${combined_dates_str:+$'\n'}$d"
         fi
     done
-    combined_dates=()
+
+    # "Latest" = latest N distinct dates (6-digit prefix); include EVERY folder sharing
+    # one of those dates, so suffixed variants (e.g. 260526_MaFo) sync alongside 260526.
+    all_dates_sorted=()
     if [ -n "$combined_dates_str" ]; then
         while IFS= read -r d; do
-            [ -n "$d" ] && combined_dates+=("$d")
-        done <<< "$(echo "$combined_dates_str" | sort -r | head -n "$FOLDER_COUNT")"
+            [ -n "$d" ] && all_dates_sorted+=("$d")
+        done <<< "$(echo "$combined_dates_str" | sort -r)"
     fi
+    selected_prefixes=()
+    for d in "${all_dates_sorted[@]}"; do
+        p="${d:0:6}"
+        already=0
+        for sp in "${selected_prefixes[@]}"; do
+            [ "$sp" = "$p" ] && { already=1; break; }
+        done
+        if [ "$already" -eq 0 ]; then
+            [ "${#selected_prefixes[@]}" -ge "$FOLDER_COUNT" ] && break
+            selected_prefixes+=("$p")
+        fi
+    done
+    combined_dates=()
+    for d in "${all_dates_sorted[@]}"; do
+        p="${d:0:6}"
+        for sp in "${selected_prefixes[@]}"; do
+            if [ "$sp" = "$p" ]; then combined_dates+=("$d"); break; fi
+        done
+    done
 
     for date_folder in "${combined_dates[@]}"; do
         printf "  Scanning %s/%s...${CLR}\r" "$label" "$date_folder"

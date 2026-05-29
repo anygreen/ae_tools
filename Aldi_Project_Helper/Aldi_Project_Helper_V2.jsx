@@ -21,7 +21,7 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.3.1";
+    var SCRIPT_VERSION = "v2.3.2";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
@@ -1841,7 +1841,30 @@
                     if (!found) combinedDateFolders.push(remoteDateFolders[i]);
                 }
                 combinedDateFolders.sort(function(a, b) { return b.localeCompare(a); });
-                combinedDateFolders = combinedDateFolders.slice(0, folderCount);
+
+                // "Latest" selects the latest N distinct dates (6-digit prefix), then
+                // includes EVERY folder sharing one of those dates — so suffixed variants
+                // (e.g. "260526_MaFo") sync alongside the bare "260526" folder.
+                var selectedPrefixes = [];
+                for (var i = 0; i < combinedDateFolders.length; i++) {
+                    var prefix = getDatePrefix(combinedDateFolders[i]);
+                    var prefixSeen = false;
+                    for (var j = 0; j < selectedPrefixes.length; j++) {
+                        if (selectedPrefixes[j] === prefix) { prefixSeen = true; break; }
+                    }
+                    if (!prefixSeen) {
+                        if (selectedPrefixes.length >= folderCount) break;
+                        selectedPrefixes.push(prefix);
+                    }
+                }
+                var selectedDateFolders = [];
+                for (var i = 0; i < combinedDateFolders.length; i++) {
+                    var fprefix = getDatePrefix(combinedDateFolders[i]);
+                    for (var j = 0; j < selectedPrefixes.length; j++) {
+                        if (selectedPrefixes[j] === fprefix) { selectedDateFolders.push(combinedDateFolders[i]); break; }
+                    }
+                }
+                combinedDateFolders = selectedDateFolders;
 
                 for (var i = 0; i < combinedDateFolders.length; i++) {
                     allSyncedFolders.push({ rootLabel: root.label, dateFolder: combinedDateFolders[i] });

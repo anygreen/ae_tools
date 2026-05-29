@@ -105,7 +105,14 @@ function Get-FtpUrl([string]$path) {
 }
 
 function Test-DateFolder([string]$name) {
-    return $name -match '^\d{6}$'
+    # A date folder starts with a 6-digit YYMMDD date, optionally followed by an
+    # appended label (e.g. "260526" or "260526_MaFo"). The 6 digits must be followed
+    # by a non-digit or end-of-name, so "2605261" is not treated as a date folder.
+    return $name -match '^\d{6}(\D.*)?$'
+}
+
+function Get-DatePrefix([string]$name) {
+    return $name.Substring(0, 6)
 }
 
 function Test-SkipFile([string]$name) {
@@ -255,7 +262,7 @@ for ($r = 0; $r -lt $scanRootCount; $r++) {
         $remoteDates = $remoteItems | Where-Object { Test-DateFolder $_ } | Sort-Object -Descending
     }
 
-    # Combine and deduplicate
+    # Combine and deduplicate date folders by full name, newest first
     $dateSet = @{}
     $combinedDates = @()
     foreach ($d in @($localDates) + @($remoteDates)) {
@@ -264,7 +271,19 @@ for ($r = 0; $r -lt $scanRootCount; $r++) {
             $combinedDates += $d
         }
     }
-    $combinedDates = $combinedDates | Sort-Object -Descending | Select-Object -First $folderCount
+    $combinedDates = @($combinedDates | Sort-Object -Descending)
+
+    # "Latest" = latest N distinct dates (6-digit prefix); include EVERY folder sharing
+    # one of those dates, so suffixed variants (e.g. 260526_MaFo) sync alongside 260526.
+    $selectedPrefixes = @()
+    foreach ($d in $combinedDates) {
+        $p = Get-DatePrefix $d
+        if ($selectedPrefixes -notcontains $p) {
+            if ($selectedPrefixes.Count -ge $folderCount) { break }
+            $selectedPrefixes += $p
+        }
+    }
+    $combinedDates = @($combinedDates | Where-Object { $selectedPrefixes -contains (Get-DatePrefix $_) })
 
     foreach ($dateFolder in $combinedDates) {
         Write-Host -NoNewline "  Scanning $label/$dateFolder...$CLR`r"
