@@ -150,6 +150,7 @@ Tracked scripts and their current manifest versions:
 Large or complex tools have a sibling `*.md` next to the source. **Read the doc before editing the tool** — it covers folder conventions, the configuration files the script reads, the helper scripts it launches, and the cross-process flows.
 
 - `Aldi_Project_Helper/Aldi_Project_Helper.md` — covers UI structure, the project / sub-project / KW conventions, the `_renderTMP` background-render flow, the render config file format consumed by `_render_upload.{sh,ps1}`, and FTP sync (Ae vs CLI modes).
+- `anyPin/anyPin.md` — covers Puppet Pin matchNames and selection resolution, the pin→null link expression and why it uses `fromComp(c.toComp(c.anchorPoint))`, and the expression-evaluation trick used to place the nulls (ExtendScript has no `toComp()`).
 
 When you update one of these tools, update the corresponding doc in the same commit if behavior or file format changes.
 
