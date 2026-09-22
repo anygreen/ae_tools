@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.8";
+    var SCRIPT_VERSION = "v2.1.9";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -1004,8 +1004,13 @@ function createSmartPrecomp(comp, selectedLayers) {
         if (layers[i].parent && !isSelected(layers[i].parent)) layers[i].parent = null;
     }
 
-    // 4. Precompose, named after the topmost selected layer
-    var name = layers[0].name;
+    // 4. Precompose, named after the topmost selected layer. Read what else
+    //    the precomp inherits from it now, before the layer moves away.
+    var name  = layers[0].name;
+    var label = layers[0].label;
+    var targetFolder = (layers[0].source && layers[0].source.parentFolder)
+        ? layers[0].source.parentFolder   // next to the layer's footage / precomp
+        : comp.parentFolder;              // text, shape, camera: no source, stay with the comp
     var indices = [];
     for (var i = 0; i < layers.length; i++) indices.push(layers[i].index);
     var precomp = comp.layers.precompose(indices, name, true);
@@ -1016,6 +1021,10 @@ function createSmartPrecomp(comp, selectedLayers) {
         if (candidate.source && candidate.source.id === precomp.id) { precompLayer = candidate; break; }
     }
     if (!precompLayer) throw new Error("Precompose succeeded but the new layer could not be found.");
+
+    precomp.parentFolder = targetFolder;
+    precomp.label        = label;
+    precompLayer.label   = label;
 
     // 5. Crop the precomp. Resizing keeps the top-left origin, so shift the
     //    contents up/left by the crop offset. Children follow their parents.
