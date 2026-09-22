@@ -4,7 +4,7 @@
 # Usage: _ftp_sync.sh <config_file_path>
 
 # ============================================================
-# CONFIG PARSING
+# CONFIG PARSING TEST
 # ============================================================
 
 CONFIG_FILE="$1"
