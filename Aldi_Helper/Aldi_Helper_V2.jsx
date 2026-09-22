@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.6";
+    var SCRIPT_VERSION = "v2.1.7";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -275,6 +275,137 @@ function getLayerSourceSize(layer) {
     return [width, height];
 }
 
+// ─── Visible (mask-aware) layer bounds ────────────────────────────────────────
+// ExtendScript cannot measure a mask directly (sourceRectAtTime ignores masks),
+// so the mask path is copied onto a temporary shape layer, whose
+// sourceRectAtTime() does report the exact bezier bounds. Same trick as
+// createShapeFromMask() further down.
+
+function getMaskPathBounds(comp, maskProp, time) {
+    var shapeLayer = comp.layers.addShape();
+    try {
+        var shapeGroup = shapeLayer.property("Contents").addProperty("ADBE Vector Group");
+        var shapePath  = shapeGroup.property("Contents").addProperty("ADBE Vector Shape - Group");
+        shapePath.property("Path").setValue(maskProp.property("maskPath").valueAtTime(time, false));
+        shapeGroup.property("Contents").addProperty("ADBE Vector Graphic - Fill");
+        var rect = shapeLayer.sourceRectAtTime(time, false);
+        return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+    } finally {
+        shapeLayer.remove();
+    }
+}
+
+// Union of the bounds of every mask that defines the layer boundary, in the
+// layer's own coordinate space. Returns null when the layer has no such mask.
+// Subtracted and inverted masks are ignored: they cut away from the visible
+// area instead of defining it. Masks set to "None" ARE counted, because the
+// Aldi PSDs use them as boundary guides (see getReferenceMask).
+function getLayerMaskBounds(comp, layer, time) {
+    var masks = layer.mask;
+    if (!masks || masks.numProperties === 0) return null;
+
+    var bounds = null;
+    for (var i = 1; i <= masks.numProperties; i++) {
+        var maskProp = masks.property(i);
+        if (maskProp.maskMode === MaskMode.SUBTRACT) continue;
+        if (maskProp.inverted) continue;
+
+        var rect = getMaskPathBounds(comp, maskProp, time);
+
+        var expansion = 0;
+        try {
+            expansion = maskProp.property("maskExpansion").valueAtTime(time, false);
+        } catch (e) {
+            expansion = 0;
+        }
+        if (expansion !== 0) {
+            rect.left   -= expansion;
+            rect.top    -= expansion;
+            rect.width  = Math.max(0, rect.width  + expansion * 2);
+            rect.height = Math.max(0, rect.height + expansion * 2);
+        }
+
+        if (!bounds) {
+            bounds = rect;
+        } else {
+            var left   = Math.min(bounds.left, rect.left);
+            var top    = Math.min(bounds.top,  rect.top);
+            var right  = Math.max(bounds.left + bounds.width,  rect.left + rect.width);
+            var bottom = Math.max(bounds.top  + bounds.height, rect.top  + rect.height);
+            bounds = { left: left, top: top, width: right - left, height: bottom - top };
+        }
+    }
+    return bounds;
+}
+
+// Bounds the layer actually occupies, in layer space: the mask boundary when
+// the layer is masked, otherwise the full source / text / shape rect.
+// "masked" tells the caller which of the two it got.
+function getLayerVisibleRect(comp, layer, time) {
+    var maskRect = getLayerMaskBounds(comp, layer, time);
+    if (maskRect && maskRect.width > 0 && maskRect.height > 0) {
+        maskRect.masked = true;
+        return maskRect;
+    }
+
+    var rect;
+    if (layer.source && layer.source.width && layer.source.height) {
+        rect = { left: 0, top: 0, width: layer.source.width, height: layer.source.height };
+    } else {
+        var src = layer.sourceRectAtTime(time, false);
+        rect = { left: src.left, top: src.top, width: src.width, height: src.height };
+    }
+    rect.masked = false;
+    return rect;
+}
+
+// Move the anchor point to the centre of the given layer-space rect and
+// compensate Position so the layer does not shift — the same result as centring
+// it by hand with the Pan Behind (anchor point) tool.
+// Returns false and leaves the layer alone when Anchor Point or Position is
+// already animated or expression-driven, since compensating would fight them.
+function centerAnchorToRect(layer, rect) {
+    var transform  = layer.property("Transform");
+    var anchorProp = transform.property("Anchor Point");
+    var posProp    = transform.property("Position");
+
+    if (anchorProp.numKeys > 0 || posProp.numKeys > 0) return false;
+    if (anchorProp.expressionEnabled || posProp.expressionEnabled) return false;
+
+    var oldAnchor = anchorProp.value;
+    var oldPos    = posProp.value;
+    var scale     = transform.property("Scale").value;
+
+    var newAnchor = oldAnchor.slice();
+    newAnchor[0] = rect.left + rect.width  / 2;
+    newAnchor[1] = rect.top  + rect.height / 2;
+
+    // The anchor shift happens in layer space, so scale and rotate it before
+    // adding it to the comp-space position.
+    var dx = (newAnchor[0] - oldAnchor[0]) * scale[0] / 100;
+    var dy = (newAnchor[1] - oldAnchor[1]) * scale[1] / 100;
+
+    var rotation = 0;
+    try {
+        // matchName, because 3D layers call it "Z Rotation" and 2D ones "Rotation"
+        var rotProp = transform.property("ADBE Rotate Z");
+        if (rotProp) rotation = rotProp.value;
+    } catch (e) {
+        rotation = 0;
+    }
+    var rad = rotation * Math.PI / 180;
+    var cos = Math.cos(rad);
+    var sin = Math.sin(rad);
+
+    var newPos = oldPos.slice();
+    newPos[0] = oldPos[0] + dx * cos - dy * sin;
+    newPos[1] = oldPos[1] + dx * sin + dy * cos;
+
+    anchorProp.setValue(newAnchor);
+    posProp.setValue(newPos);
+    return true;
+}
+
 function createEasyMorph(comp, selectedLayers) {
     if (comp.frameRate !== 25) {
         alert("Warning: Composition frame rate is " + comp.frameRate + " fps, not 25 fps");
@@ -300,18 +431,40 @@ function createEasyMorph(comp, selectedLayers) {
     var blendReverseStart = currentTime + (30 * frameDuration);
     var blendReverseEnd   = currentTime + (40 * frameDuration);
 
-    var mainSize = getLayerSourceSize(mainLayer);
-    var refSize  = getLayerSourceSize(refLayer);
+    // Measure what the layers actually show: a masked layer morphs on its mask
+    // boundary, an unmasked one on its full source rect.
+    var mainRect = getLayerVisibleRect(comp, mainLayer, currentTime);
+    var refRect  = getLayerVisibleRect(comp, refLayer,  currentTime);
+
+    // A masked layer animates around its mask boundary, so put its anchor point
+    // in the centre of that boundary first (without moving the layer).
+    if (mainRect.masked) centerAnchorToRect(mainLayer, mainRect);
+    if (refRect.masked)  centerAnchorToRect(refLayer,  refRect);
 
     var mainPosition = mainLayer.property("Transform").property("Position");
     var refPosition  = refLayer.property("Transform").property("Position");
     var mainScale    = mainLayer.property("Transform").property("Scale");
+    var mainAnchor   = mainLayer.property("Transform").property("Anchor Point").value;
+    var refAnchor    = refLayer.property("Transform").property("Anchor Point").value;
 
     var mainPos = mainPosition.value;
     var refPos  = refPosition.value;
 
-    var scaleX = (refSize[0] / mainSize[0]) * 100;
-    var scaleY = (refSize[1] / mainSize[1]) * 100;
+    var scaleX = (mainRect.width  > 0) ? (refRect.width  / mainRect.width)  * 100 : 100;
+    var scaleY = (mainRect.height > 0) ? (refRect.height / mainRect.height) * 100 : 100;
+
+    // Position moves the anchor point, but the boundary we are matching is not
+    // necessarily centred on it (a mask rarely is). Offset the start position by
+    // the difference so the two boundaries sit exactly on top of each other.
+    // Scaling happens around the anchor, so main's offset is scaled too.
+    var mainOffsetX = mainRect.left + mainRect.width  / 2 - mainAnchor[0];
+    var mainOffsetY = mainRect.top  + mainRect.height / 2 - mainAnchor[1];
+    var refOffsetX  = refRect.left  + refRect.width   / 2 - refAnchor[0];
+    var refOffsetY  = refRect.top   + refRect.height  / 2 - refAnchor[1];
+
+    var startPos = refPos.slice();
+    startPos[0] = refPos[0] + refOffsetX - mainOffsetX * scaleX / 100;
+    startPos[1] = refPos[1] + refOffsetY - mainOffsetY * scaleY / 100;
 
     var currentScale = mainScale.value;
     var refScale, mainScaleValue;
@@ -328,7 +481,7 @@ function createEasyMorph(comp, selectedLayers) {
     var easeIn  = new KeyframeEase(0, 66);
     var easeOut = new KeyframeEase(0, 44);
 
-    mainPosition.setValueAtTime(currentTime, refPos);
+    mainPosition.setValueAtTime(currentTime, startPos);
     mainPosition.setValueAtTime(forwardEndTime, mainPos);
     var posKey1 = mainPosition.nearestKeyIndex(currentTime);
     var posKey2 = mainPosition.nearestKeyIndex(forwardEndTime);
@@ -336,7 +489,7 @@ function createEasyMorph(comp, selectedLayers) {
     mainPosition.setTemporalEaseAtKey(posKey2, [easeIn], [easeOut]);
 
     mainPosition.setValueAtTime(reverseStartTime, mainPos);
-    mainPosition.setValueAtTime(reverseEndTime, refPos);
+    mainPosition.setValueAtTime(reverseEndTime, startPos);
     var posKey3 = mainPosition.nearestKeyIndex(reverseStartTime);
     var posKey4 = mainPosition.nearestKeyIndex(reverseEndTime);
     mainPosition.setTemporalEaseAtKey(posKey3, [easeIn], [easeOut]);
