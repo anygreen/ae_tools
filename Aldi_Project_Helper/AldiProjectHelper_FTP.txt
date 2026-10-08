@@ -51,6 +51,14 @@ port=21
 [/CONNECTION]
 
 [CONNECTION]
+project_folder=Aldi_V42_Adhoc
+hostname=fra-clients.acht.studio
+username=aldi_adhoc_lennert_exchange
+password=Hju89ndsTds
+port=21
+[/CONNECTION]
+
+[CONNECTION]
 project_folder=2601_Telekom_WM_DOOH
 hostname=fra-clients.acht.studio
 username=wm_lennert_exchange
