@@ -67,6 +67,22 @@ port=21
 [/CONNECTION]
 
 [CONNECTION]
+project_folder=Aldi_V44_ANAS_Xmas_Silvester
+hostname=fra-clients.acht.studio
+username=exchange_xmas_ANAS
+password=tzbsdjhsld89
+port=21
+[/CONNECTION]
+
+[CONNECTION]
+project_folder=Aldi_V45_AS_Xmas_Silvester
+hostname=fra-clients.acht.studio
+username=exchange_xmas_AS
+password=lGsvs0923nm
+port=21
+[/CONNECTION]
+
+[CONNECTION]
 project_folder=2601_Telekom_WM_DOOH
 hostname=fra-clients.acht.studio
 username=wm_lennert_exchange
