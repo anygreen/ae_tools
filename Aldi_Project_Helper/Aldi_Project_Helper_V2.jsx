@@ -21,11 +21,15 @@
     // ============================================================
 
     var SCRIPT_NAME    = "Aldi Project Helper";
-    var SCRIPT_VERSION = "v2.3.6";
+    var SCRIPT_VERSION = "v2.3.7";
     var SETTINGS_SECTION = "AldiProjectHelper";
 
     var AE_PATH_SEGMENT  = "06_vfx/02_ae";
-    var EXCLUDED_FOLDERS = ["Adobe After Effects Auto-Save"];
+    // Auto-save folders: older AE versions use "Adobe After Effects Auto-Save",
+    // newer ones just "Auto-Save". Match any folder name containing "auto-save".
+    var AUTOSAVE_FOLDER_REGEX = /auto[\s_-]?save/i;
+    // Auto-save files are named "<project> auto-save N.aep"
+    var AUTOSAVE_FILE_REGEX   = /\sauto-save\s*\d*\.aep$/i;
     var FTP_INPUT_PATH   = "01_inbox";
     var FTP_OUTPUT_PATH  = "06_vfx/03_out";
     var FTP_CONFIG_FILE  = "~/Documents/AldiProjectHelper_FTP.txt";
@@ -138,6 +142,25 @@
     // HELPER FUNCTIONS - File System Operations
     // ============================================================
 
+    // Folder.name / File.name are URI-encoded in ExtendScript ("Auto%20Save"), so decode first
+    function decodedName(item) {
+        try { return decodeURI(item.name); } catch (e) { return item.name; }
+    }
+
+    function isAutoSaveFolder(folder) {
+        return AUTOSAVE_FOLDER_REGEX.test(decodedName(folder));
+    }
+
+    function isAutoSaveFile(file) {
+        if (AUTOSAVE_FILE_REGEX.test(decodedName(file))) return true;
+        // Also catch any .aep that sits somewhere inside an auto-save folder
+        var parts = file.fsName.replace(/\\/g, "/").split("/");
+        for (var i = 0; i < parts.length - 1; i++) {
+            if (AUTOSAVE_FOLDER_REGEX.test(parts[i])) return true;
+        }
+        return false;
+    }
+
     function scanForAEPFiles(folder, results, relativePath) {
         if (!folder.exists) return;
 
@@ -146,24 +169,13 @@
             var item = items[i];
 
             if (item instanceof Folder) {
-                var shouldExclude = false;
-                for (var j = 0; j < EXCLUDED_FOLDERS.length; j++) {
-                    if (item.name === EXCLUDED_FOLDERS[j]) { shouldExclude = true; break; }
-                }
-                if (!shouldExclude) {
+                if (!isAutoSaveFolder(item)) {
                     var newRelativePath = relativePath ? relativePath + "/" + item.name : item.name;
                     scanForAEPFiles(item, results, newRelativePath);
                 }
             } else if (item instanceof File) {
-                if (item.name.toLowerCase().match(/\.aep$/)) {
-                    var fullPath = item.fsName;
-                    var isInExcludedFolder = false;
-                    for (var k = 0; k < EXCLUDED_FOLDERS.length; k++) {
-                        if (fullPath.indexOf(EXCLUDED_FOLDERS[k]) !== -1) { isInExcludedFolder = true; break; }
-                    }
-                    if (!isInExcludedFolder) {
-                        results.push({ file: item, relativePath: relativePath || "", modDate: new Date(item.modified) });
-                    }
+                if (item.name.toLowerCase().match(/\.aep$/) && !isAutoSaveFile(item)) {
+                    results.push({ file: item, relativePath: relativePath || "", modDate: new Date(item.modified) });
                 }
             }
         }
@@ -187,11 +199,7 @@
             var item = items[i];
             if (!(item instanceof Folder)) continue;
 
-            var shouldExclude = false;
-            for (var j = 0; j < EXCLUDED_FOLDERS.length; j++) {
-                if (item.name === EXCLUDED_FOLDERS[j]) { shouldExclude = true; break; }
-            }
-            if (shouldExclude) continue;
+            if (isAutoSaveFolder(item)) continue;
 
             var subItems = item.getFiles();
             for (var k = 0; k < subItems.length; k++) {

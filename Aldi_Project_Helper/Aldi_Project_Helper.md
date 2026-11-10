@@ -23,7 +23,7 @@ For a project rooted at `<projectPath>`:
 | `<projectPath>/06_vfx/03_out/` | Where renders go. Render output paths are `03_out/[<subProject>/]<YYMMDD>/<HHhMM>/<filename>`. |
 | `<projectPath>/01_inbox/` | FTP "Input" sync target. |
 
-KW folders are named `KW##` (e.g. `KW17`). Sub-project detection ignores `Adobe After Effects Auto-Save`.
+KW folders are named `KW##` (e.g. `KW17`). Sub-project detection and the AEP scan ignore auto-save folders (any folder name containing "auto-save": `Adobe After Effects Auto-Save` in older AE, `Auto-Save` in newer AE).
 
 ## UI structure
 
@@ -54,7 +54,7 @@ All settings live under the `AldiProjectHelper` section of AE prefs via `app.set
 ### Project / sub-project detection
 - `loadProjectList()` reads the encoded project list from prefs.
 - `detectSubProjects(aeFolder)` returns subfolders of `02_ae` that themselves contain a KW folder or `.aep`. Empty list = flat or KW-only project.
-- `findMostRecentAEP(projectPath, subProject)` recursively scans for `.aep` files (excluding auto-save folders) and returns the newest by mtime.
+- `findMostRecentAEP(projectPath, subProject)` recursively scans for `.aep` files (excluding auto-save folders and `* auto-save N.aep` files) and returns the newest by mtime.
 - `findSubProjectWithMostRecent(...)` picks the sub-project containing the newest AEP — used to auto-select the right sub-project on refresh.
 
 ### Filename processing
