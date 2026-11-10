@@ -1,6 +1,6 @@
 (function createUI(thisObj) {
     var SCRIPT_NAME = "Aldi Helper";
-    var SCRIPT_VERSION = "v2.1.9";
+    var SCRIPT_VERSION = "v2.2.0";
 
     var panel = (thisObj instanceof Panel) ? thisObj : new Window("palette", SCRIPT_NAME, undefined, {resizeable: true});
 
@@ -252,6 +252,104 @@
             complexMorphSetupV2(groups, contentGroups);
         } catch (err) {
             alert("An error occurred: " + err.toString());
+        }
+    };
+
+    // ─── Stars Tab ────────────────────────────────────────────────────────────
+    // Xmas star pops (scale only, values from the KW46/KW47 Xmas projects):
+    //   in  0 -> 120 % (5 f) -> 100 % (8 f), out 100 -> 120 % (3 f) -> 0 % (8 f), ease 66 / 44
+
+    var starsTab = tabs.add("tab", undefined, "Stars");
+    starsTab.orientation = "column";
+    starsTab.alignment = ["fill", "fill"];
+
+    var starsContent = starsTab.add("group");
+    starsContent.orientation = "column";
+    starsContent.alignment = ["fill", "fill"];
+    starsContent.alignChildren = ["fill", "top"];
+    starsContent.margins = 8;
+    starsContent.spacing = 5;
+
+    function starsRow(label) {
+        var row = starsContent.add("group");
+        row.orientation = "row";
+        row.alignment = ["fill", "top"];
+        row.spacing = 4;
+        var txt = row.add("statictext", undefined, label);
+        txt.preferredSize.width = 80;
+        return row;
+    }
+
+    var starsModeRow = starsRow("Animation:");
+    var starsModeList = starsModeRow.add("dropdownlist", undefined, ["Pop In", "Pop Out", "Pop In + Out"]);
+    starsModeList.alignment = ["fill", "center"];
+    starsModeList.selection = 0;
+
+    var starsOrderRow = starsRow("Order:");
+    var starsOrderList = starsOrderRow.add("dropdownlist", undefined,
+        ["Selection order", "Layer index", "Left to right", "Right to left", "Top to bottom", "Bottom to top"]);
+    starsOrderList.alignment = ["fill", "center"];
+    starsOrderList.selection = 0;
+
+    var starsInRow = starsRow("In offset (f):");
+    var starsInField = starsInRow.add("edittext", undefined, "2");
+    starsInField.characters = 4;
+
+    var starsOutRow = starsRow("Out offset (f):");
+    var starsOutField = starsOutRow.add("edittext", undefined, "1");
+    starsOutField.characters = 4;
+
+    var starsAfterRow = starsRow("Out after (f):");
+    var starsAfterField = starsAfterRow.add("edittext", undefined, "50");
+    starsAfterField.characters = 4;
+    starsAfterField.helpTip = "Pop In + Out: frames from the current time to the first pop-out";
+
+    var starsReverseCheck = starsContent.add("checkbox", undefined, "Reverse order for Pop Out");
+    var starsBlurCheck    = starsContent.add("checkbox", undefined, "Motion blur");
+    starsBlurCheck.value  = true;
+
+    var starsApplyBtn = starsContent.add("button", undefined, "Apply Stars");
+    starsApplyBtn.preferredSize.height = 30;
+
+    var starsInfo = starsContent.add("statictext", undefined,
+        "In: 0 > 120 > 100 % (5 / 8 f)\nOut: 100 > 120 > 0 % (3 / 8 f)\nStarts at the current time.", {multiline: true});
+    starsInfo.preferredSize.height = 48;
+
+    function updateStarsFields() {
+        var mode = starsModeList.selection ? starsModeList.selection.index : 0;
+        starsInField.enabled      = (mode !== 1);
+        starsOutField.enabled     = (mode !== 0);
+        starsReverseCheck.enabled = (mode !== 0);
+        starsAfterField.enabled   = (mode === 2);
+    }
+    starsModeList.onChange = updateStarsFields;
+    updateStarsFields();
+
+    starsApplyBtn.onClick = function() {
+        app.beginUndoGroup("Stars Pop");
+        try {
+            var comp = app.project.activeItem;
+            if (!comp || !(comp instanceof CompItem)) { alert("Please select a composition"); return; }
+            var sel = comp.selectedLayers;
+            if (sel.length === 0) { alert("Please select at least one layer"); return; }
+            var modes = ["in", "out", "both"];
+            var opts = {
+                mode:       modes[starsModeList.selection ? starsModeList.selection.index : 0],
+                order:      starsOrderList.selection ? starsOrderList.selection.index : 0,
+                inOffset:   parseStarFrames(starsInField.text, "In offset"),
+                outOffset:  parseStarFrames(starsOutField.text, "Out offset"),
+                outAfter:   parseStarFrames(starsAfterField.text, "Out after"),
+                reverseOut: starsReverseCheck.value,
+                motionBlur: starsBlurCheck.value
+            };
+            var report = createStarPops(comp, sel, opts);
+            if (report.warnings.length > 0) {
+                alert("Stars: " + report.done + " layer(s) animated.\n\n" + report.warnings.join("\n"));
+            }
+        } catch (err) {
+            alert("An error occurred: " + err.toString());
+        } finally {
+            app.endUndoGroup();
         }
     };
 
@@ -1104,4 +1202,180 @@ function createDoohOffset(comp, selectedLayers) {
             layer.startTime += (totalOffset * comp.frameDuration);
         }
     }
+}
+
+// ─── Stars (Xmas star pops) ──────────────────────────────────────────────────
+// Values read from the Xmas Silvester AEPs (AN OLV, ANAS TVC, AS OLV, KW46/KW47): scale only, no opacity,
+// speed 0 / influence 66 in, 44 out (first key in-side and last key out-side keep AE's 16.67 like the hand-made keys).
+
+var STAR_POP = {
+    inFrames:  [0, 5, 8], inScale:  [0, 120, 100],
+    outFrames: [0, 3, 8], outScale: [100, 120, 0],
+    overshoot: 120,
+    easeIn: 66, easeOut: 44, easeEdge: 16.666667
+};
+
+function parseStarFrames(text, label) {
+    var s = String(text).replace(/^\s+|\s+$/g, "");
+    if (!/^\d+$/.test(s)) throw new Error(label + " must be a whole number of frames (0 or more)");
+    return parseInt(s, 10);
+}
+
+function starLayerPosition(layer, time) {
+    var pos = layer.property("ADBE Transform Group").property("ADBE Position");
+    var v = pos.valueAtTime(time, false);
+    return [v[0], v[1]];
+}
+
+// order: 0 selection, 1 layer index, 2 left to right, 3 right to left, 4 top to bottom, 5 bottom to top
+function sortStarLayers(layers, order, time) {
+    var list = [];
+    for (var i = 0; i < layers.length; i++) {
+        list.push({ layer: layers[i], sel: i, index: layers[i].index, pos: starLayerPosition(layers[i], time) });
+    }
+    list.sort(function(a, b) {
+        var d = 0;
+        if (order === 0)      d = a.sel - b.sel;
+        else if (order === 1) d = a.index - b.index;
+        else if (order === 2) d = a.pos[0] - b.pos[0];
+        else if (order === 3) d = b.pos[0] - a.pos[0];
+        else if (order === 4) d = a.pos[1] - b.pos[1];
+        else                  d = b.pos[1] - a.pos[1];
+        if (d === 0) d = a.index - b.index;
+        return d;
+    });
+    var out = [];
+    for (var j = 0; j < list.length; j++) out.push(list[j].layer);
+    return out;
+}
+
+// The layer's "100 %" scale: the current value, or (if the star is keyed) the key value that has a
+// matching 120 % overshoot key, or the first non-zero key value. Falls back to 100 %.
+function starBaseScale(prop, time) {
+    function nonZero(v) { return Math.abs(v[0]) > 0.001 || Math.abs(v[1]) > 0.001; }
+    if (prop.numKeys === 0) {
+        var cur = prop.value;
+        if (nonZero(cur)) return cur;
+    } else {
+        var vals = [], k, m;
+        for (k = 1; k <= prop.numKeys; k++) {
+            var kv = prop.keyValue(k);
+            if (nonZero(kv)) vals.push(kv);
+        }
+        for (k = 0; k < vals.length; k++) {
+            for (m = 0; m < vals.length; m++) {
+                if (Math.abs(vals[m][0] - vals[k][0] * STAR_POP.overshoot / 100) < 0.01 &&
+                    Math.abs(vals[m][1] - vals[k][1] * STAR_POP.overshoot / 100) < 0.01) return vals[k];
+            }
+        }
+        if (vals.length > 0) return vals[0];
+    }
+    var dims = prop.value.length, base = [];
+    for (var d = 0; d < dims; d++) base.push(100);
+    return base;
+}
+
+function starScaleValue(base, pct) {
+    var v = [base[0] * pct / 100, base[1] * pct / 100];
+    if (base.length > 2) v.push(base[2]);   // z stays
+    return v;
+}
+
+function removeKeysInRange(prop, t0, t1, eps) {
+    var removed = 0;
+    for (var k = prop.numKeys; k >= 1; k--) {
+        var t = prop.keyTime(k);
+        if (t >= t0 - eps && t <= t1 + eps) { prop.removeKey(k); removed++; }
+    }
+    return removed;
+}
+
+function setStarPopKeys(prop, startFrame, fd, frames, pcts, base) {
+    var times = [], values = [], i;
+    for (i = 0; i < frames.length; i++) {
+        times.push((startFrame + frames[i]) * fd);
+        values.push(starScaleValue(base, pcts[i]));
+    }
+    prop.setValuesAtTimes(times, values);
+    var dims = prop.value.length;
+    for (i = 0; i < times.length; i++) {
+        var k = prop.nearestKeyIndex(times[i]);
+        var inInf  = STAR_POP.easeIn;
+        var outInf = STAR_POP.easeOut;
+        if (i === 0) inInf = STAR_POP.easeEdge;
+        if (i === times.length - 1) outInf = STAR_POP.easeEdge;
+        var eIn = [], eOut = [];
+        for (var d = 0; d < dims; d++) { eIn.push(new KeyframeEase(0, inInf)); eOut.push(new KeyframeEase(0, outInf)); }
+        prop.setInterpolationTypeAtKey(k, KeyframeInterpolationType.BEZIER, KeyframeInterpolationType.BEZIER);
+        prop.setTemporalEaseAtKey(k, eIn, eOut);
+    }
+}
+
+// opts: mode "in" | "out" | "both", order (see sortStarLayers), inOffset, outOffset, outAfter (frames),
+//       reverseOut, motionBlur. Returns { done, replaced, warnings[] }.
+function createStarPops(comp, selectedLayers, opts) {
+    var fd        = comp.frameDuration;
+    var eps       = fd / 2;
+    var cti       = comp.time;
+    var startF    = Math.round(cti / fd);
+    var doIn      = (opts.mode === "in" || opts.mode === "both");
+    var doOut     = (opts.mode === "out" || opts.mode === "both");
+    var outStartF = startF;
+    if (opts.mode === "both") outStartF = startF + opts.outAfter;
+
+    var layers = [], skipped = [], i;
+    for (i = 0; i < selectedLayers.length; i++) {
+        var L = selectedLayers[i];
+        var tg = L.property("ADBE Transform Group");
+        var sc = tg ? tg.property("ADBE Scale") : null;
+        if (!sc) { skipped.push(L.name + " (no scale)"); continue; }
+        if (L.locked) { skipped.push(L.name + " (locked)"); continue; }
+        layers.push(L);
+    }
+    if (layers.length === 0) throw new Error("No usable layer selected (" + skipped.join(", ") + ")");
+
+    var ordered = sortStarLayers(layers, opts.order, cti);
+    var n = ordered.length;
+    var plan = [];
+    for (i = 0; i < n; i++) {
+        var p = { layer: ordered[i] };
+        var outIdx = i;
+        if (opts.reverseOut) outIdx = n - 1 - i;
+        if (doIn)  p.inF  = startF + i * opts.inOffset;
+        if (doOut) p.outF = outStartF + outIdx * opts.outOffset;
+        plan.push(p);
+    }
+    if (doIn && doOut) {
+        // every star must finish its pop in before its pop out starts
+        var minAfter = 0, clash = null;
+        for (i = 0; i < n; i++) {
+            var need = (plan[i].inF + STAR_POP.inFrames[2]) - (plan[i].outF - opts.outAfter);
+            if (need > minAfter) minAfter = need;
+            if (plan[i].outF < plan[i].inF + STAR_POP.inFrames[2] && !clash) clash = plan[i].layer.name;
+        }
+        if (clash) throw new Error("Out after is too short: \"" + clash + "\" would pop out before its pop in ends.\nUse at least " + minAfter + " f.");
+    }
+
+    var warnings = [], replaced = 0, kept = 0, exprLayers = [];
+    for (i = 0; i < plan.length; i++) {
+        var lay  = plan[i].layer;
+        var prop = lay.property("ADBE Transform Group").property("ADBE Scale");
+        var base = starBaseScale(prop, cti);
+        var t0, t1;
+        if (doIn) t0 = plan[i].inF * fd; else t0 = plan[i].outF * fd;
+        if (doOut) t1 = (plan[i].outF + STAR_POP.outFrames[2]) * fd; else t1 = (plan[i].inF + STAR_POP.inFrames[2]) * fd;
+
+        replaced += removeKeysInRange(prop, t0, t1, eps);
+        kept += prop.numKeys;
+        if (doIn)  setStarPopKeys(prop, plan[i].inF,  fd, STAR_POP.inFrames,  STAR_POP.inScale,  base);
+        if (doOut) setStarPopKeys(prop, plan[i].outF, fd, STAR_POP.outFrames, STAR_POP.outScale, base);
+        if (prop.expressionEnabled && prop.expression !== "") exprLayers.push(lay.name);
+        if (opts.motionBlur) lay.motionBlur = true;
+    }
+
+    if (replaced > 0) warnings.push("Replaced " + replaced + " existing scale key(s) in the new range.");
+    if (kept > 0)     warnings.push("Kept " + kept + " scale key(s) outside the new range - check the curves around them.");
+    if (exprLayers.length > 0) warnings.push("Scale expression on: " + exprLayers.join(", ") + " (it may override the keys).");
+    if (skipped.length > 0)    warnings.push("Skipped: " + skipped.join(", "));
+    return { done: plan.length, replaced: replaced, warnings: warnings };
 }
